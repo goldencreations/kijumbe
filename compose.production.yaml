@@ -1,0 +1,72 @@
+name: kijumbe
+
+x-kijumbe-app: &kijumbe-app
+  image: kijumbe-backend:${APP_IMAGE_TAG:-latest}
+  build:
+    context: .
+    target: production
+  env_file:
+    - ${BACKEND_ENV_FILE:-.env.production}
+  restart: unless-stopped
+  depends_on:
+    mysql:
+      condition: service_healthy
+  networks:
+    - kijumbe-internal
+
+services:
+  api:
+    <<: *kijumbe-app
+    container_name: kijumbe-api
+    expose:
+      - "8080"
+    networks:
+      - kijumbe-internal
+      - npm-proxy
+    healthcheck:
+      test: ["CMD", "php", "-r", "exit(@file_get_contents('http://127.0.0.1:8080/up') === false ? 1 : 0);"]
+      interval: 15s
+      timeout: 5s
+      retries: 10
+      start_period: 30s
+
+  queue:
+    <<: *kijumbe-app
+    container_name: kijumbe-queue
+    command: ["php", "artisan", "queue:work", "--sleep=3", "--tries=5", "--timeout=120", "--max-time=3600"]
+    stop_grace_period: 2m
+
+  scheduler:
+    <<: *kijumbe-app
+    container_name: kijumbe-scheduler
+    command: ["php", "artisan", "schedule:work"]
+
+  mysql:
+    image: mysql:8.4
+    container_name: kijumbe-mysql
+    restart: unless-stopped
+    environment:
+      MYSQL_DATABASE: ${DB_DATABASE}
+      MYSQL_USER: ${DB_USERNAME}
+      MYSQL_PASSWORD: ${DB_PASSWORD}
+      MYSQL_ROOT_PASSWORD: ${DB_ROOT_PASSWORD}
+    volumes:
+      - kijumbe-mysql-data:/var/lib/mysql
+    networks:
+      - kijumbe-internal
+    healthcheck:
+      test: ["CMD-SHELL", "mysqladmin ping -h 127.0.0.1 -u root -p$${MYSQL_ROOT_PASSWORD} --silent"]
+      interval: 10s
+      timeout: 5s
+      retries: 20
+      start_period: 30s
+
+networks:
+  kijumbe-internal:
+    driver: bridge
+  npm-proxy:
+    external: true
+    name: ${NPM_NETWORK:-npm_default}
+
+volumes:
+  kijumbe-mysql-data:

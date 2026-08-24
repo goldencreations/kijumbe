@@ -98,4 +98,6 @@ vendor/bin/pint --test
 `kijumbe:integration-status` prints only whether each required value is present; it never prints tokens or API keys.
 
 The complete account, webhook and real-money launch procedure is in [docs/LIVE_PILOT_RUNBOOK.md](docs/LIVE_PILOT_RUNBOOK.md).
+
+The exact GitHub-to-server Docker and Nginx Proxy Manager procedure is in [docs/DOCKER_SERVER_DEPLOYMENT.md](docs/DOCKER_SERVER_DEPLOYMENT.md).
 # kijumbe

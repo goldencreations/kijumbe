@@ -3,6 +3,7 @@
 use App\Http\Controllers\Api\V1\AuthController;
 use App\Http\Controllers\Api\V1\ContributionController;
 use App\Http\Controllers\Api\V1\CycleController;
+use App\Http\Controllers\Api\V1\DashboardController;
 use App\Http\Controllers\Api\V1\GroupController;
 use App\Http\Controllers\Api\V1\LivePayoutController;
 use App\Http\Controllers\Api\V1\OfficeUserController;
@@ -30,6 +31,10 @@ Route::prefix('v1')->group(function () {
     Route::middleware(['auth:sanctum', 'active.user', 'throttle:api'])->group(function () {
         Route::get('/auth/me', [AuthController::class, 'me']);
         Route::post('/auth/logout', [AuthController::class, 'logout']);
+
+        Route::get('/dashboard', [DashboardController::class, 'index']);
+        Route::get('/dashboard/operations', [DashboardController::class, 'operations']);
+        Route::get('/dashboard/audit-logs', [DashboardController::class, 'auditLogs']);
 
         Route::get('/office-users', [OfficeUserController::class, 'index']);
         Route::post('/office-users', [OfficeUserController::class, 'store']);
