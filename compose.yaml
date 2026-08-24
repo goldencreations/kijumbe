@@ -1,0 +1,22 @@
+services:
+  mysql:
+    image: mysql:8.4
+    container_name: kijumbe-mysql
+    restart: unless-stopped
+    environment:
+      MYSQL_DATABASE: kijumbe
+      MYSQL_USER: kijumbe
+      MYSQL_PASSWORD: secret
+      MYSQL_ROOT_PASSWORD: root-secret
+    ports:
+      - "3306:3306"
+    volumes:
+      - kijumbe_mysql_data:/var/lib/mysql
+    healthcheck:
+      test: ["CMD", "mysqladmin", "ping", "-h", "localhost", "-uroot", "-proot-secret"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+
+volumes:
+  kijumbe_mysql_data:
