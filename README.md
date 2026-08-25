@@ -87,6 +87,22 @@ POST   /webhooks/payments/selcom/notification
 
 The older manual contribution and payout endpoints remain available for controlled recovery, but live operation should use provider-backed attempts and callbacks.
 
+## Interactive API documentation
+
+The OpenAPI 3.1 documentation is generated from the Laravel routes, request validation, and response types:
+
+- Documentation UI: `/docs/api`
+- OpenAPI JSON: `/docs/api.json`
+
+Local development allows access without credentials when both documentation variables are empty. Production requires HTTP Basic credentials:
+
+```dotenv
+API_DOCS_USERNAME=kijumbe-docs
+API_DOCS_PASSWORD=replace-with-a-strong-random-password
+```
+
+After changing routes or API types in production, refresh the cached schema with `php artisan scramble:cache`.
+
 ## Production checks
 
 ```bash
