@@ -103,6 +103,12 @@ API_DOCS_PASSWORD=replace-with-a-strong-random-password
 
 After changing routes or API types in production, refresh the cached schema with `php artisan scramble:cache`.
 
+## Production database interface
+
+The production compose stack includes phpMyAdmin at the URL configured by `PHPMYADMIN_URL`. The container is available only through the internal Docker proxy network; MySQL port `3306` is never published to the host.
+
+The Nginx Proxy Manager host must forward HTTPS traffic to `kijumbe-phpmyadmin` on HTTP port `80` and use an Access List. Sign in to phpMyAdmin with the non-root `DB_USERNAME` and `DB_PASSWORD` values from `.env.production`.
+
 ## Production checks
 
 ```bash

@@ -88,6 +88,27 @@ services:
       retries: 20
       start_period: 30s
 
+  phpmyadmin:
+    image: phpmyadmin:5.2.3-apache
+    container_name: kijumbe-phpmyadmin
+    restart: unless-stopped
+    depends_on:
+      mysql:
+        condition: service_healthy
+    environment:
+      PMA_HOST: mysql
+      PMA_PORT: 3306
+      PMA_VERBOSE: Kijumbe MySQL
+      PMA_ABSOLUTE_URI: ${PHPMYADMIN_URL:-https://db-kijumbe.goldencreations.online/}
+      UPLOAD_LIMIT: 64M
+      HIDE_PHP_VERSION: "true"
+      TZ: Africa/Dar_es_Salaam
+    expose:
+      - "80"
+    networks:
+      - kijumbe-internal
+      - npm-proxy
+
 networks:
   kijumbe-internal:
     driver: bridge
