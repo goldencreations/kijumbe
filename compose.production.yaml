@@ -15,9 +15,22 @@ x-kijumbe-app: &kijumbe-app
     - kijumbe-internal
 
 services:
+  migrate:
+    <<: *kijumbe-app
+    container_name: kijumbe-migrate
+    restart: "no"
+    command: ["php", "artisan", "migrate", "--force"]
+    healthcheck:
+      disable: true
+
   api:
     <<: *kijumbe-app
     container_name: kijumbe-api
+    depends_on:
+      mysql:
+        condition: service_healthy
+      migrate:
+        condition: service_completed_successfully
     expose:
       - "8080"
     networks:
@@ -33,13 +46,27 @@ services:
   queue:
     <<: *kijumbe-app
     container_name: kijumbe-queue
+    depends_on:
+      mysql:
+        condition: service_healthy
+      migrate:
+        condition: service_completed_successfully
     command: ["php", "artisan", "queue:work", "--sleep=3", "--tries=5", "--timeout=120", "--max-time=3600"]
     stop_grace_period: 2m
+    healthcheck:
+      disable: true
 
   scheduler:
     <<: *kijumbe-app
     container_name: kijumbe-scheduler
+    depends_on:
+      mysql:
+        condition: service_healthy
+      migrate:
+        condition: service_completed_successfully
     command: ["php", "artisan", "schedule:work"]
+    healthcheck:
+      disable: true
 
   mysql:
     image: mysql:8.4
