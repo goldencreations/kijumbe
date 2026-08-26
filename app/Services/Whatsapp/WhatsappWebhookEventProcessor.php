@@ -9,7 +9,10 @@ use Illuminate\Support\Carbon;
 
 class WhatsappWebhookEventProcessor
 {
-    public function __construct(private readonly WhatsappConversationService $conversation) {}
+    public function __construct(
+        private readonly WhatsappConversationService $conversation,
+        private readonly GroupFlowService $groupFlow,
+    ) {}
 
     public function process(WhatsappWebhookEvent $event): void
     {
@@ -74,7 +77,43 @@ class WhatsappWebhookEventProcessor
         );
 
         if ($user) {
+            $flowResponse = $this->extractFlowResponse($message);
+            if ($flowResponse !== null) {
+                $group = $this->groupFlow->createFromFlow($user, $flowResponse);
+                $this->conversation->sendGroupCreatedConfirmation($user, $group->name);
+
+                return;
+            }
+
             $this->conversation->handle($user, $message);
         }
+    }
+
+    /**
+     * @param array<string, mixed> $message
+     * @return array<string, mixed>|null
+     */
+    private function extractFlowResponse(array $message): ?array
+    {
+        $interactiveType = data_get($message, 'interactive.type');
+        if ($interactiveType !== 'nfm_reply' && $interactiveType !== 'flow_reply') {
+            return null;
+        }
+
+        $responseJson = data_get($message, 'interactive.nfm_reply.response_json')
+            ?? data_get($message, 'interactive.flow_reply.response_json')
+            ?? data_get($message, 'interactive.nfm_reply.response_json');
+
+        if (is_array($responseJson)) {
+            return $responseJson;
+        }
+
+        if (! is_string($responseJson) || trim($responseJson) === '') {
+            return [];
+        }
+
+        $decoded = json_decode($responseJson, true);
+
+        return is_array($decoded) ? $decoded : [];
     }
 }

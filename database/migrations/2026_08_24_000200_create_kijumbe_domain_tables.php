@@ -9,7 +9,7 @@ return new class extends Migration
     public function up(): void
     {
         Schema::create('groups', function (Blueprint $table) {
-            $table->id();
+            $table->uuid('id')->primary();
             $table->string('name');
             $table->text('description')->nullable();
             $table->string('status', 24)->default('active')->index();
@@ -19,7 +19,7 @@ return new class extends Migration
 
         Schema::create('group_members', function (Blueprint $table) {
             $table->id();
-            $table->foreignId('group_id')->constrained()->cascadeOnDelete();
+            $table->foreignUuid('group_id')->constrained('groups')->cascadeOnDelete();
             $table->foreignId('user_id')->constrained()->restrictOnDelete();
             $table->string('role', 24)->default('member')->index();
             $table->boolean('is_active')->default(true)->index();
@@ -32,7 +32,7 @@ return new class extends Migration
 
         Schema::create('cycles', function (Blueprint $table) {
             $table->id();
-            $table->foreignId('group_id')->constrained()->cascadeOnDelete();
+            $table->foreignUuid('group_id')->constrained('groups')->cascadeOnDelete();
             $table->string('name');
             $table->unsignedBigInteger('contribution_amount');
             $table->char('currency', 3)->default('TZS');

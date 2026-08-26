@@ -16,9 +16,11 @@ use App\Models\PaymentAttempt;
 use App\Models\Payout;
 use App\Models\Round;
 use App\Models\User;
+use App\Services\Whatsapp\MetaWhatsAppClient;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Carbon;
 use Laravel\Sanctum\Sanctum;
+use Mockery;
 use Tests\TestCase;
 
 class LiveIntegrationsTest extends TestCase
@@ -85,6 +87,63 @@ class LiveIntegrationsTest extends TestCase
         $this->assertDatabaseHas('whatsapp_messages', [
             'meta_message_id' => 'wamid.office.1',
             'direction' => 'incoming',
+        ]);
+    }
+
+    public function test_whatsapp_flow_reply_creates_and_stores_a_group(): void
+    {
+        $admin = User::factory()->create(['system_role' => SystemRole::Admin, 'whatsapp_wa_id' => '255700000001', 'is_active' => true, 'whatsapp_opted_in_at' => now()]);
+
+        $whatsapp = Mockery::mock(MetaWhatsAppClient::class);
+        $whatsapp->shouldReceive('sendText')->once()->withArgs(function (User $user, string $text) use ($admin) {
+            return $user->is($admin) && str_contains($text, 'has been created and stored successfully');
+        })->andReturnUsing(fn () => new \App\Models\WhatsappMessage());
+        $this->app->instance(MetaWhatsAppClient::class, $whatsapp);
+
+        $payload = [
+            'object' => 'whatsapp_business_account',
+            'entry' => [[
+                'changes' => [[
+                    'value' => [
+                        'metadata' => ['phone_number_id' => '123456789'],
+                        'messages' => [[
+                            'from' => '255700000001',
+                            'id' => 'wamid.flow.1',
+                            'timestamp' => '1787565600',
+                            'type' => 'interactive',
+                            'interactive' => [
+                                'type' => 'nfm_reply',
+                                'nfm_reply' => [
+                                    'response_json' => json_encode([
+                                        'group_name' => 'Mwananchi Savings',
+                                        'group_description' => 'Weekly savings group',
+                                    ], JSON_THROW_ON_ERROR),
+                                ],
+                            ],
+                        ]],
+                    ],
+                ]],
+            ]],
+        ];
+        $json = json_encode($payload, JSON_THROW_ON_ERROR);
+        $signature = 'sha256='.hash_hmac('sha256', $json, config('services.whatsapp.app_secret') ?: 'testing-secret');
+
+        config([
+            'services.whatsapp.app_secret' => 'testing-secret',
+            'services.whatsapp.phone_number_id' => '123456789',
+        ]);
+
+        $this->call('POST', '/api/v1/webhooks/whatsapp', [], [], [], [
+            'CONTENT_TYPE' => 'application/json',
+            'HTTP_X_HUB_SIGNATURE_256' => $signature,
+        ], $json)->assertOk();
+
+        $group = Group::query()->where('name', 'Mwananchi Savings')->firstOrFail();
+        $this->assertMatchesRegularExpression('/^[0-9a-f-]{36}$/', $group->id);
+        $this->assertDatabaseHas('group_members', [
+            'group_id' => $group->id,
+            'user_id' => $admin->id,
+            'role' => GroupRole::Coordinator->value,
         ]);
     }
 

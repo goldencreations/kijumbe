@@ -4,6 +4,7 @@ namespace App\Services\Whatsapp;
 
 use App\Enums\ContributionStatus;
 use App\Models\Contribution;
+use App\Models\Group;
 use App\Models\User;
 use App\Services\PaymentAttemptService;
 
@@ -67,6 +68,11 @@ class WhatsappConversationService
         }
 
         $this->whatsapp->sendText($user, 'Reply PAY to pay, STATUS to check your next contribution, or STOP to opt out.');
+    }
+
+    public function sendGroupCreatedConfirmation(User $user, string $groupName): void
+    {
+        $this->whatsapp->sendText($user, "Your group \"{$groupName}\" has been created and stored successfully.");
     }
 
     private function nextContribution(User $user): ?Contribution

@@ -12,6 +12,10 @@ class Group extends Model
 {
     use HasFactory;
 
+    public $incrementing = false;
+
+    protected $keyType = 'string';
+
     protected $fillable = ['name', 'description', 'status', 'created_by'];
 
     protected function casts(): array
@@ -32,5 +36,16 @@ class Group extends Model
     public function cycles(): HasMany
     {
         return $this->hasMany(Cycle::class);
+    }
+
+    protected static function booted(): void
+    {
+        static::creating(function (self $group): void {
+            if ($group->getKey()) {
+                return;
+            }
+
+            $group->setAttribute($group->getKeyName(), (string) str()->uuid());
+        });
     }
 }
