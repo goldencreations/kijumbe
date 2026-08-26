@@ -87,6 +87,28 @@ POST   /webhooks/payments/selcom/notification
 
 The older manual contribution and payout endpoints remain available for controlled recovery, but live operation should use provider-backed attempts and callbacks.
 
+## Interactive API documentation
+
+The OpenAPI 3.1 documentation is generated from the Laravel routes, request validation, and response types:
+
+- Documentation UI: `/docs/api`
+- OpenAPI JSON: `/docs/api.json`
+
+Local development allows access without credentials when both documentation variables are empty. Production requires HTTP Basic credentials:
+
+```dotenv
+API_DOCS_USERNAME=kijumbe-docs
+API_DOCS_PASSWORD=replace-with-a-strong-random-password
+```
+
+After changing routes or API types in production, refresh the cached schema with `php artisan scramble:cache`.
+
+## Production database interface
+
+The production compose stack includes phpMyAdmin at the URL configured by `PHPMYADMIN_URL`. The container is available only through the internal Docker proxy network; MySQL port `3306` is never published to the host.
+
+The Nginx Proxy Manager host must forward HTTPS traffic to `kijumbe-phpmyadmin` on HTTP port `80` and use an Access List. Sign in to phpMyAdmin with the non-root `DB_USERNAME` and `DB_PASSWORD` values from `.env.production`.
+
 ## Production checks
 
 ```bash
