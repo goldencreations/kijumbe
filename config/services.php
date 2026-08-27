@@ -37,12 +37,12 @@ return [
 
     'whatsapp' => [
         'live_enabled' => env('WHATSAPP_LIVE_ENABLED', false),
-        'graph_version' => env('WHATSAPP_GRAPH_VERSION', 'v26.0'),
-        'business_account_id' => env('WHATSAPP_BUSINESS_ACCOUNT_ID'),
+        'graph_version' => env('WHATSAPP_GRAPH_API_VERSION', env('WHATSAPP_GRAPH_VERSION', 'v26.0')),
+        'business_account_id' => env('WHATSAPP_BUSINESS_ID', env('WHATSAPP_BUSINESS_ACCOUNT_ID')),
         'phone_number_id' => env('WHATSAPP_PHONE_NUMBER_ID'),
-        'access_token' => env('WHATSAPP_ACCESS_TOKEN'),
+        'access_token' => env('WHATSAPP_ACCESS_TOKEN', env('PERMANENT_WHATSAPP_ACCESS_TOKEN')),
         'app_secret' => env('WHATSAPP_APP_SECRET'),
-        'verify_token' => env('WHATSAPP_VERIFY_TOKEN'),
+        'verify_token' => env('WHATSAPP_WEBHOOK_VERIFY_TOKEN', env('WHATSAPP_VERIFY_TOKEN')),
     ],
 
     'payments' => [

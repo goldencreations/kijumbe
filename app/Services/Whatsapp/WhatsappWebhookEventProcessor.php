@@ -3,6 +3,7 @@
 namespace App\Services\Whatsapp;
 
 use App\Models\User;
+use App\Models\WhatsappInboundContact;
 use App\Models\WhatsappMessage;
 use App\Models\WhatsappWebhookEvent;
 use Illuminate\Support\Carbon;
@@ -12,6 +13,7 @@ class WhatsappWebhookEventProcessor
     public function __construct(
         private readonly WhatsappConversationService $conversation,
         private readonly GroupFlowService $groupFlow,
+        private readonly WhatsappFlowSessionService $flowSessions,
     ) {}
 
     public function process(WhatsappWebhookEvent $event): void
@@ -61,15 +63,34 @@ class WhatsappWebhookEventProcessor
         $message = (array) $event->payload['message'];
         $value = (array) $event->payload['value'];
         $waId = preg_replace('/\D+/', '', (string) ($message['from'] ?? ''));
+        $messageId = (string) ($message['id'] ?? '');
+        $phoneNumberId = (string) data_get($value, 'metadata.phone_number_id');
+
+        $this->upsertInboundContact($waId, $messageId, $phoneNumberId, $message);
         $user = User::query()->where('whatsapp_wa_id', $waId)->where('is_active', true)->first();
 
+        if (! $user && $waId !== '') {
+            $user = User::query()->firstOrCreate(
+                ['whatsapp_wa_id' => $waId],
+                [
+                    'name' => 'WhatsApp '.$waId,
+                    'email' => $waId.'@whatsapp.kijumbe.local',
+                    'phone' => $waId,
+                    'password' => bcrypt(str()->random(32)),
+                    'system_role' => 'member',
+                    'is_active' => true,
+                    'whatsapp_opted_in_at' => now(),
+                ],
+            );
+        }
+
         WhatsappMessage::query()->firstOrCreate(
-            ['meta_message_id' => $message['id'] ?? null],
+            ['meta_message_id' => $messageId ?: null],
             [
                 'user_id' => $user?->id,
                 'direction' => 'incoming',
                 'wa_id' => $waId,
-                'phone_number_id' => data_get($value, 'metadata.phone_number_id'),
+                'phone_number_id' => $phoneNumberId,
                 'message_type' => $message['type'] ?? 'unknown',
                 'status' => 'received',
                 'payload' => $message,
@@ -80,8 +101,16 @@ class WhatsappWebhookEventProcessor
             $flowResponse = $this->extractFlowResponse($message);
             if ($flowResponse !== null) {
                 $group = $this->groupFlow->createFromFlow($user, $flowResponse);
+                $session = $this->flowSessions->resume($user, WhatsappFlowSessionService::GROUP_CREATION);
+                if ($session) {
+                    $this->flowSessions->complete($session);
+                }
                 $this->conversation->sendGroupCreatedConfirmation($user, $group->name);
 
+                return;
+            }
+
+            if ($this->conversation->startOrContinueGroupCreation($user, $message)) {
                 return;
             }
 
@@ -115,5 +144,30 @@ class WhatsappWebhookEventProcessor
         $decoded = json_decode($responseJson, true);
 
         return is_array($decoded) ? $decoded : [];
+    }
+
+    /**
+     * Store every inbound sender, even if they are not an existing user.
+     *
+     * @param array<string, mixed> $message
+     */
+    private function upsertInboundContact(string $waId, string $messageId, string $phoneNumberId, array $message): void
+    {
+        if ($waId === '') {
+            return;
+        }
+
+        $now = now();
+        $contact = WhatsappInboundContact::query()->firstOrNew(['wa_id' => $waId]);
+        $contact->fill([
+            'phone_number_id' => $phoneNumberId ?: null,
+            'last_message_id' => $messageId ?: null,
+            'last_message_type' => (string) ($message['type'] ?? 'unknown'),
+            'first_seen_at' => $contact->exists ? $contact->first_seen_at : $now,
+            'last_seen_at' => $now,
+            'message_count' => ($contact->message_count ?? 0) + 1,
+            'last_payload' => $message,
+        ]);
+        $contact->save();
     }
 }

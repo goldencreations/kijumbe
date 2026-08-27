@@ -17,6 +17,8 @@ use App\Models\Payout;
 use App\Models\Round;
 use App\Models\User;
 use App\Services\Whatsapp\MetaWhatsAppClient;
+use App\Services\Whatsapp\WhatsappConversationService;
+use App\Services\Whatsapp\WhatsappFlowSessionService;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Carbon;
 use Laravel\Sanctum\Sanctum;
@@ -96,7 +98,7 @@ class LiveIntegrationsTest extends TestCase
 
         $whatsapp = Mockery::mock(MetaWhatsAppClient::class);
         $whatsapp->shouldReceive('sendText')->once()->withArgs(function (User $user, string $text) use ($admin) {
-            return $user->is($admin) && str_contains($text, 'has been created and stored successfully');
+            return $user->is($admin) && str_contains($text, 'kimehifadhiwa vizuri');
         })->andReturnUsing(fn () => new \App\Models\WhatsappMessage());
         $this->app->instance(MetaWhatsAppClient::class, $whatsapp);
 
@@ -117,6 +119,16 @@ class LiveIntegrationsTest extends TestCase
                                     'response_json' => json_encode([
                                         'group_name' => 'Mwananchi Savings',
                                         'group_description' => 'Weekly savings group',
+                                        'language' => 'sw',
+                                        'contribution_amount' => 1000,
+                                        'currency' => 'TZS',
+                                        'period_days' => 7,
+                                        'member_slots' => 10,
+                                        'cycle_starts_at' => '2026-08-25 10:00:00',
+                                        'payout_order' => 'fifo',
+                                        'grace_period_hours' => 24,
+                                        'platform_fee_amount' => 50,
+                                        'resolution_threshold_percent' => 75,
                                     ], JSON_THROW_ON_ERROR),
                                 ],
                             ],
@@ -140,11 +152,95 @@ class LiveIntegrationsTest extends TestCase
 
         $group = Group::query()->where('name', 'Mwananchi Savings')->firstOrFail();
         $this->assertMatchesRegularExpression('/^[0-9a-f-]{36}$/', $group->id);
+        $this->assertSame('draft', $group->status->value);
+        $this->assertSame('255700000001', $group->created_by_phone);
+        $this->assertSame('255700000001', $group->created_by_wa_id);
+        $this->assertSame('sw', $group->language);
+        $this->assertSame(1000, $group->contribution_amount);
+        $this->assertSame('TZS', $group->currency);
+        $this->assertSame(7, $group->period_days);
+        $this->assertSame(10, $group->member_slots);
+        $this->assertSame(24, $group->grace_period_hours);
+        $this->assertSame(50, $group->platform_fee_amount);
+        $this->assertSame(75, $group->resolution_threshold_percent);
         $this->assertDatabaseHas('group_members', [
             'group_id' => $group->id,
             'user_id' => $admin->id,
             'role' => GroupRole::Coordinator->value,
         ]);
+    }
+
+    public function test_group_code_flow_allows_join_and_details_with_session_persistence(): void
+    {
+        $creator = User::factory()->create([
+            'whatsapp_wa_id' => '255700000010',
+            'phone' => '255700000010',
+            'is_active' => true,
+            'whatsapp_opted_in_at' => now(),
+        ]);
+        $group = Group::create([
+            'id' => (string) str()->uuid(),
+            'name' => 'Jamii Savings',
+            'description' => 'Weekly group',
+            'status' => GroupStatus::Draft,
+            'created_by' => $creator->id,
+            'created_by_phone' => '255700000010',
+            'created_by_wa_id' => '255700000010',
+            'language' => 'sw',
+            'contribution_amount' => 2000,
+            'currency' => 'TZS',
+            'period_days' => 7,
+            'member_slots' => 10,
+            'cycle_starts_at' => now()->addDay(),
+            'payout_order' => 'fixed',
+            'grace_period_hours' => 24,
+            'platform_fee_amount' => 500,
+            'resolution_threshold_percent' => 70,
+        ]);
+        GroupMember::create([
+            'group_id' => $group->id,
+            'user_id' => $creator->id,
+            'role' => GroupRole::Coordinator,
+            'is_active' => true,
+            'joined_at' => now(),
+        ]);
+
+        $member = User::factory()->create([
+            'whatsapp_wa_id' => '255700000011',
+            'phone' => '255700000011',
+            'is_active' => true,
+            'whatsapp_opted_in_at' => now(),
+        ]);
+
+        $whatsapp = Mockery::mock(MetaWhatsAppClient::class);
+        $whatsapp->shouldReceive('sendText')->twice()->andReturnUsing(fn () => new \App\Models\WhatsappMessage());
+        $this->app->instance(MetaWhatsAppClient::class, $whatsapp);
+
+        $conversation = $this->app->make(WhatsappConversationService::class);
+        $conversation->handle($member, ['id' => 'wamid.group.1', 'text' => ['body' => $group->id]]);
+
+        $session = \App\Models\WhatsappFlowSession::query()
+            ->where('user_id', $member->id)
+            ->where('flow_key', WhatsappFlowSessionService::GROUP_ACTION)
+            ->firstOrFail();
+        $this->assertSame('choose_action', $session->step_key);
+
+        $conversation->handle($member, ['id' => 'wamid.group.2', 'text' => ['body' => '1']]);
+
+        $this->assertDatabaseHas('group_members', [
+            'group_id' => $group->id,
+            'user_id' => $member->id,
+            'role' => GroupRole::Member->value,
+            'is_active' => true,
+        ]);
+
+        $creatorWhatsapp = Mockery::mock(MetaWhatsAppClient::class);
+        $creatorWhatsapp->shouldReceive('sendText')->twice()->andReturnUsing(fn () => new \App\Models\WhatsappMessage());
+        $this->app->instance(MetaWhatsAppClient::class, $creatorWhatsapp);
+
+        $conversation = $this->app->make(WhatsappConversationService::class);
+        $conversation->handle($creator, ['id' => 'wamid.group.3', 'text' => ['body' => $group->id]]);
+        $conversation->handle($creator, ['id' => 'wamid.group.4', 'text' => ['body' => '3']]);
     }
 
     public function test_authenticated_selcom_payment_is_posted_exactly_once(): void

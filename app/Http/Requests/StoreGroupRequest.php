@@ -16,6 +16,16 @@ class StoreGroupRequest extends FormRequest
         return [
             'name' => ['required', 'string', 'max:120'],
             'description' => ['nullable', 'string', 'max:1000'],
+            'language' => ['nullable', 'string', 'max:12'],
+            'contribution_amount' => ['nullable', 'integer', 'min:0'],
+            'currency' => ['nullable', 'string', 'size:3'],
+            'period_days' => ['nullable', 'integer', 'min:1'],
+            'member_slots' => ['nullable', 'integer', 'min:1'],
+            'cycle_starts_at' => ['nullable', 'date'],
+            'payout_order' => ['nullable', 'string', 'max:32'],
+            'grace_period_hours' => ['nullable', 'integer', 'min:0'],
+            'platform_fee_amount' => ['nullable', 'integer', 'min:0'],
+            'resolution_threshold_percent' => ['nullable', 'integer', 'min:1', 'max:100'],
         ];
     }
 }

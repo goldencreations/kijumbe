@@ -59,3 +59,8 @@ Route::prefix('v1')->group(function () {
         Route::post('/payouts/{payout}/approve', [LivePayoutController::class, 'approve']);
     });
 });
+
+Route::get('/webhooks/whatsapp', [MetaWhatsappWebhookController::class, 'verify'])
+    ->middleware('throttle:120,1');
+Route::post('/webhooks/whatsapp', [MetaWhatsappWebhookController::class, 'receive'])
+    ->middleware('throttle:240,1');

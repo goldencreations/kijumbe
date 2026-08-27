@@ -11,6 +11,7 @@ use App\Models\Group;
 use App\Models\GroupMember;
 use App\Services\AuditService;
 use App\Services\GroupAccess;
+use Carbon\Carbon;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
@@ -38,10 +39,17 @@ class GroupController extends Controller
     public function store(StoreGroupRequest $request): JsonResponse
     {
         $group = DB::transaction(function () use ($request) {
+            $validated = $request->validated();
+            $creatorPhone = preg_replace('/\D+/', '', (string) ($request->user()->whatsapp_wa_id ?: $request->user()->phone));
             $group = Group::create([
-                ...$request->validated(),
-                'status' => GroupStatus::Active,
+                ...$validated,
+                'status' => GroupStatus::Draft,
                 'created_by' => $request->user()->id,
+                'created_by_phone' => $creatorPhone ?: null,
+                'created_by_wa_id' => $request->user()->whatsapp_wa_id ?: null,
+                'language' => $validated['language'] ?? 'sw',
+                'currency' => $validated['currency'] ?? 'TZS',
+                'cycle_starts_at' => isset($validated['cycle_starts_at']) ? Carbon::parse($validated['cycle_starts_at']) : null,
             ]);
             GroupMember::create([
                 'group_id' => $group->id,

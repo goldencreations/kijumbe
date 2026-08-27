@@ -7,7 +7,6 @@
 .phpunit.cache
 .phpunit.result.cache
 node_modules
-public/build
 storage/logs/*
 storage/framework/cache/*
 storage/framework/sessions/*

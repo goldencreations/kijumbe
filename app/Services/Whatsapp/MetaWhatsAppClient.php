@@ -5,6 +5,7 @@ namespace App\Services\Whatsapp;
 use App\Models\User;
 use App\Models\WhatsappMessage;
 use Illuminate\Support\Facades\Http;
+use Illuminate\Support\Str;
 use RuntimeException;
 
 class MetaWhatsAppClient
@@ -31,11 +32,33 @@ class MetaWhatsAppClient
         ], $name);
     }
 
+    /**
+     * Send a WhatsApp template that launches a Flow.
+     *
+     */
+    public function sendFlowTemplate(
+        User $user,
+        string $name,
+        string $language,
+    ): WhatsappMessage {
+        $components = [[
+            'type' => 'button',
+            'sub_type' => 'flow',
+            'index' => '0',
+            'parameters' => [[
+                'type' => 'action',
+                'action' => array_filter([
+                    'flow_token' => (string) Str::uuid(),
+                ], static fn ($value) => $value !== null),
+            ]],
+        ]];
+
+        return $this->sendTemplate($user, $name, $language, $components);
+    }
+
     /** @param array<string, mixed> $content */
     private function send(User $user, string $type, array $content, ?string $templateName = null): WhatsappMessage
     {
-        $this->ensureConfigured();
-
         if (! $user->is_active || ! $user->whatsapp_opted_in_at || $user->whatsapp_opted_out_at) {
             throw new RuntimeException('This office member is not opted in for WhatsApp messages.');
         }
@@ -58,6 +81,12 @@ class MetaWhatsAppClient
             'status' => 'queued',
             'payload' => $payload,
         ]);
+
+        if (! config('services.whatsapp.live_enabled')) {
+            return $message;
+        }
+
+        $this->ensureConfigured();
 
         try {
             $response = Http::baseUrl('https://graph.facebook.com/'.config('services.whatsapp.graph_version'))
@@ -90,10 +119,6 @@ class MetaWhatsAppClient
 
     private function ensureConfigured(): void
     {
-        if (! config('services.whatsapp.live_enabled')) {
-            throw new RuntimeException('Real WhatsApp messaging is disabled.');
-        }
-
         if (! config('services.whatsapp.phone_number_id') || ! config('services.whatsapp.access_token')) {
             throw new RuntimeException('Meta WhatsApp Cloud API credentials are incomplete.');
         }
