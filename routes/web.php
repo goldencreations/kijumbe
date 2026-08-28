@@ -1,13 +1,21 @@
 <?php
 
 use Illuminate\Support\Facades\Route;
+use App\Http\Controllers\AdminAuthController;
 use App\Http\Controllers\AdminDashboardController;
 
 Route::get('/', function () {
     return view('welcome');
 });
 
-Route::get('/admin/dashboard', AdminDashboardController::class)->name('admin.dashboard');
+Route::get('/admin/login', [AdminAuthController::class, 'create'])->name('admin.login');
+Route::post('/admin/login', [AdminAuthController::class, 'store'])->name('admin.login.store');
+
+Route::post('/logout', [AdminAuthController::class, 'destroy'])->middleware('auth')->name('admin.logout');
+
+Route::get('/admin/dashboard', AdminDashboardController::class)
+    ->middleware('auth')
+    ->name('admin.dashboard');
 
 Route::get('/privacy-policy', function () {
     return response(

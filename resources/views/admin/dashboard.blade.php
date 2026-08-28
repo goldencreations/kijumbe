@@ -6,7 +6,7 @@
     <title>Kijumbe Admin Dashboard</title>
     @vite(['resources/css/app.css', 'resources/js/app.js'])
 </head>
-<body class="min-h-screen bg-[#f3efe8] text-slate-900">
+<body class="min-h-screen overflow-x-hidden bg-[#f3efe8] text-slate-900">
     @php
         $selectedGroup ??= null;
         $memberCount = $selectedGroup?->active_members_count ?? 0;
@@ -26,8 +26,8 @@
     @endphp
 
     <div class="min-h-screen bg-[radial-gradient(circle_at_top_left,_#2a3559_0,_#0f172a_36%,_#f3efe8_36%)]">
-        <div class="mx-auto flex min-h-screen max-w-[1600px] px-4 py-4 sm:px-6 lg:px-8">
-            <aside class="hidden w-72 flex-col rounded-[32px] border border-white/30 bg-slate-950/90 p-5 text-white shadow-[0_30px_80px_rgba(15,23,42,.28)] backdrop-blur xl:flex">
+        <div class="mx-auto flex min-h-screen max-w-[1600px] flex-col gap-4 px-4 py-4 sm:px-6 lg:px-8 xl:flex-row">
+            <aside class="hidden w-72 shrink-0 flex-col rounded-[32px] border border-white/30 bg-slate-950/90 p-5 text-white shadow-[0_30px_80px_rgba(15,23,42,.28)] backdrop-blur xl:sticky xl:top-4 xl:flex xl:h-[calc(100vh-2rem)]">
                 <div class="rounded-[24px] border border-white/10 bg-white/5 p-5">
                     <div class="flex items-center gap-3">
                         <div class="grid h-12 w-12 place-items-center rounded-2xl bg-emerald-400/15 text-emerald-300 ring-1 ring-emerald-400/20">
@@ -45,17 +45,17 @@
 
                 <nav class="mt-6 space-y-2 text-sm">
                     @foreach ([
-                        ['Dashboard', true],
-                        ['Groups', false],
-                        ['Members', false],
-                        ['Cycles', false],
-                        ['Payouts', false],
-                        ['Activity', false],
-                    ] as [$label, $active])
-                        <div class="flex items-center justify-between rounded-2xl px-4 py-3 {{ $active ? 'bg-white text-slate-950' : 'bg-white/5 text-white/75 hover:bg-white/10' }}">
+                        ['Dashboard', '#overview', true],
+                        ['Groups', '#groups', false],
+                        ['Members', '#group-detail', false],
+                        ['Cycles', '#cycles', false],
+                        ['Payouts', '#summary', false],
+                        ['Activity', '#activity', false],
+                    ] as [$label, $href, $active])
+                        <a href="{{ $href }}" class="flex items-center justify-between rounded-2xl px-4 py-3 transition {{ $active ? 'bg-white text-slate-950' : 'bg-white/5 text-white/75 hover:bg-white/10' }}">
                             <span class="font-medium">{{ $label }}</span>
                             <span class="text-xs {{ $active ? 'text-emerald-700' : 'text-white/40' }}">›</span>
-                        </div>
+                        </a>
                     @endforeach
                 </nav>
 
@@ -71,11 +71,11 @@
                 </div>
             </aside>
 
-            <main class="flex-1 xl:ml-5">
+            <main class="min-w-0 flex-1 xl:ml-1">
                 <div class="overflow-hidden rounded-[36px] border border-white/50 bg-white/75 shadow-[0_30px_80px_rgba(15,23,42,.10)] backdrop-blur">
                     <header class="border-b border-slate-200/80 bg-white/70 px-5 py-5 sm:px-8">
                         <div class="flex flex-col gap-5 lg:flex-row lg:items-center lg:justify-between">
-                            <div>
+                            <div class="min-w-0">
                                 <div class="inline-flex items-center gap-2 rounded-full bg-slate-950 px-3 py-1 text-xs font-semibold tracking-[0.22em] text-white">
                                     OPERATION HUB
                                 </div>
@@ -87,28 +87,36 @@
                                 </p>
                             </div>
 
-                            <div class="grid gap-3 sm:grid-cols-3">
-                                <div class="rounded-[24px] bg-slate-950 px-4 py-4 text-white shadow-lg shadow-slate-950/10">
+                            <div class="flex flex-col gap-3 sm:grid sm:grid-cols-3">
+                                <div class="min-w-0 rounded-[24px] bg-slate-950 px-4 py-4 text-white shadow-lg shadow-slate-950/10">
                                     <p class="text-xs uppercase tracking-[0.2em] text-white/45">Active groups</p>
-                                    <p class="mt-3 text-3xl font-semibold">{{ $stats['activeGroups'] }}</p>
+                                    <p class="mt-3 break-words text-2xl font-semibold sm:text-3xl">{{ $stats['activeGroups'] }}</p>
                                     <p class="mt-1 text-xs text-white/55">Groups currently running</p>
                                 </div>
-                                <div class="rounded-[24px] border border-slate-200 bg-white px-4 py-4 shadow-sm">
+                                <div class="min-w-0 rounded-[24px] border border-slate-200 bg-white px-4 py-4 shadow-sm">
                                     <p class="text-xs uppercase tracking-[0.2em] text-slate-500">Members</p>
-                                    <p class="mt-3 text-3xl font-semibold text-slate-950">{{ $stats['members'] }}</p>
+                                    <p class="mt-3 break-words text-2xl font-semibold text-slate-950 sm:text-3xl">{{ $stats['members'] }}</p>
                                     <p class="mt-1 text-xs text-slate-500">Registered users in the system</p>
                                 </div>
-                                <div class="rounded-[24px] border border-slate-200 bg-white px-4 py-4 shadow-sm">
+                                <div class="min-w-0 rounded-[24px] border border-slate-200 bg-white px-4 py-4 shadow-sm">
                                     <p class="text-xs uppercase tracking-[0.2em] text-slate-500">Memberships</p>
-                                    <p class="mt-3 text-3xl font-semibold text-slate-950">{{ $stats['memberships'] }}</p>
+                                    <p class="mt-3 break-words text-2xl font-semibold text-slate-950 sm:text-3xl">{{ $stats['memberships'] }}</p>
                                     <p class="mt-1 text-xs text-slate-500">Active group links across groups</p>
                                 </div>
                             </div>
+                            @auth
+                                <form method="post" action="{{ route('admin.logout') }}" class="self-start lg:self-center">
+                                    @csrf
+                                    <button class="rounded-2xl border border-slate-200 bg-white px-4 py-3 text-sm font-semibold text-slate-700 transition hover:border-slate-300 hover:bg-slate-50">
+                                        Sign out
+                                    </button>
+                                </form>
+                            @endauth
                         </div>
                     </header>
 
                     <section class="px-5 py-5 sm:px-8">
-                        <form method="get" class="mb-5 grid gap-3 rounded-[28px] border border-slate-200 bg-white p-4 shadow-sm lg:grid-cols-3">
+                        <form method="get" class="mb-5 grid gap-3 rounded-[28px] border border-slate-200 bg-white p-4 shadow-sm lg:grid-cols-3" id="overview">
                             <input
                                 type="text"
                                 name="q"
@@ -129,31 +137,31 @@
 
                         <div class="grid gap-5 lg:grid-cols-12">
                             <div class="lg:col-span-8">
-                                <div class="grid gap-5 md:grid-cols-2 xl:grid-cols-4">
-                                    <article class="rounded-[28px] bg-gradient-to-br from-slate-950 to-slate-800 p-5 text-white shadow-[0_25px_60px_rgba(15,23,42,.25)]">
+                                <div class="grid gap-5 md:grid-cols-2 xl:grid-cols-4" id="summary">
+                                    <article class="min-w-0 rounded-[28px] bg-gradient-to-br from-slate-950 to-slate-800 p-5 text-white shadow-[0_25px_60px_rgba(15,23,42,.25)]">
                                         <p class="text-xs uppercase tracking-[0.25em] text-white/45">Collections</p>
-                                        <p class="mt-4 text-3xl font-semibold">{{ $stats['collectionValue'] }}</p>
+                                        <p class="mt-4 break-words text-2xl font-semibold sm:text-3xl">{{ $stats['collectionValue'] }}</p>
                                         <p class="mt-2 text-sm text-white/60">Dummy statistic for the dashboard UI</p>
                                     </article>
-                                    <article class="rounded-[28px] border border-emerald-200 bg-emerald-50 p-5">
+                                    <article class="min-w-0 rounded-[28px] border border-emerald-200 bg-emerald-50 p-5">
                                         <p class="text-xs uppercase tracking-[0.25em] text-emerald-700">Payouts</p>
-                                        <p class="mt-4 text-3xl font-semibold text-slate-950">{{ $stats['payoutValue'] }}</p>
+                                        <p class="mt-4 break-words text-2xl font-semibold text-slate-950 sm:text-3xl">{{ $stats['payoutValue'] }}</p>
                                         <p class="mt-2 text-sm text-slate-600">Dummy payout total for visual balance</p>
                                     </article>
-                                    <article class="rounded-[28px] border border-amber-200 bg-amber-50 p-5">
+                                    <article class="min-w-0 rounded-[28px] border border-amber-200 bg-amber-50 p-5">
                                         <p class="text-xs uppercase tracking-[0.25em] text-amber-700">Pending</p>
-                                        <p class="mt-4 text-3xl font-semibold text-slate-950">{{ $stats['pendingValue'] }}</p>
+                                        <p class="mt-4 break-words text-2xl font-semibold text-slate-950 sm:text-3xl">{{ $stats['pendingValue'] }}</p>
                                         <p class="mt-2 text-sm text-slate-600">Pending dummy value for alerts</p>
                                     </article>
-                                    <article class="rounded-[28px] border border-sky-200 bg-sky-50 p-5">
+                                    <article class="min-w-0 rounded-[28px] border border-sky-200 bg-sky-50 p-5">
                                         <p class="text-xs uppercase tracking-[0.25em] text-sky-700">Activity</p>
-                                        <p class="mt-4 text-3xl font-semibold text-slate-950">{{ $stats['activityRate'] }}</p>
+                                        <p class="mt-4 break-words text-2xl font-semibold text-slate-950 sm:text-3xl">{{ $stats['activityRate'] }}</p>
                                         <p class="mt-2 text-sm text-slate-600">Operational health score</p>
                                     </article>
                                 </div>
 
                                 <div class="mt-5 grid gap-5 lg:grid-cols-2">
-                                    <section class="rounded-[32px] border border-slate-200 bg-white p-5 shadow-sm">
+                                    <section class="rounded-[32px] border border-slate-200 bg-white p-5 shadow-sm" id="activity">
                                         <div class="flex items-center justify-between">
                                             <div>
                                                 <p class="text-xs uppercase tracking-[0.25em] text-slate-500">Status chart</p>
@@ -174,11 +182,11 @@
                                                         <span class="font-medium text-slate-700">{{ $item['label'] }}</span>
                                                         <span class="text-slate-500">{{ $item['value'] }}</span>
                                                     </div>
-                                                    <div class="h-3 rounded-full bg-slate-100">
-                                                        <div class="h-3 rounded-full {{ $barClass }}" style="width: {{ max($item['value'], 1) * 10 }}%"></div>
+                                                        <div class="h-3 rounded-full bg-slate-100">
+                                                            <div class="h-3 rounded-full {{ $barClass }}" style="width: {{ min(100, max(10, $item['value'] * 20)) }}%"></div>
+                                                        </div>
                                                     </div>
-                                                </div>
-                                            @endforeach
+                                                @endforeach
                                         </div>
                                     </section>
 
@@ -189,7 +197,7 @@
                                                 <h3 class="mt-1 text-xl font-semibold text-slate-950">Members and contributions</h3>
                                             </div>
                                         </div>
-                                        <div class="mt-6 grid gap-4 sm:grid-cols-2">
+                                        <div class="mt-6 grid gap-4 md:grid-cols-2">
                                             <div class="rounded-[24px] bg-slate-950 p-4 text-white">
                                                 <p class="text-xs uppercase tracking-[0.2em] text-white/50">Paid contributions</p>
                                                 <p class="mt-3 text-3xl font-semibold">{{ $stats['paidContributions'] }}</p>
@@ -215,7 +223,7 @@
                                 </div>
 
                                 <div class="mt-5 grid gap-5 xl:grid-cols-2">
-                                    <section class="rounded-[32px] border border-slate-200 bg-white p-5 shadow-sm">
+                                    <section class="rounded-[32px] border border-slate-200 bg-white p-5 shadow-sm" id="groups">
                                         <div class="flex items-center justify-between">
                                             <div>
                                                 <p class="text-xs uppercase tracking-[0.25em] text-slate-500">Groups</p>
@@ -228,15 +236,15 @@
                                             @forelse ($groups as $group)
                                                 <div class="rounded-[24px] border border-slate-200 bg-slate-50/80 p-4 transition hover:-translate-y-0.5 hover:shadow-md">
                                                     <div class="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-                                                        <div>
+                                                        <div class="min-w-0">
                                                             <div class="flex flex-wrap items-center gap-2">
-                                                                <h4 class="text-base font-semibold text-slate-950">{{ $group->name }}</h4>
+                                                                <h4 class="break-words text-base font-semibold text-slate-950">{{ $group->name }}</h4>
                                                                 <span class="rounded-full px-2.5 py-1 text-[11px] font-semibold uppercase tracking-[0.2em] {{ $group->status->value === 'active' ? 'bg-emerald-500/15 text-emerald-700' : ($group->status->value === 'archived' ? 'bg-slate-500/15 text-slate-700' : 'bg-amber-500/15 text-amber-700') }}">
                                                                     {{ ucfirst($group->status->value) }}
                                                                 </span>
                                                             </div>
                                                             <p class="mt-2 text-sm text-slate-600">
-                                                                Code <span class="font-mono text-slate-900">{{ $group->id }}</span> ·
+                                                                Code <span class="break-all font-mono text-slate-900">{{ $group->id }}</span> ·
                                                                 {{ $group->created_by_phone ?: 'No phone' }} ·
                                                                 {{ strtoupper($group->language ?: 'sw') }}
                                                             </p>
@@ -261,7 +269,7 @@
                                         </div>
                                     </section>
 
-                                    <section class="rounded-[32px] border border-slate-200 bg-white p-5 shadow-sm">
+                                    <section class="rounded-[32px] border border-slate-200 bg-white p-5 shadow-sm" id="group-detail">
                                         <div class="flex items-center justify-between">
                                             <div>
                                                 <p class="text-xs uppercase tracking-[0.25em] text-slate-500">Selected group</p>
@@ -282,7 +290,7 @@
                                                     </div>
                                                     <div class="text-right">
                                                         <p class="text-xs uppercase tracking-[0.25em] text-white/45">Group code</p>
-                                                        <p class="mt-2 font-mono text-sm text-emerald-300">{{ $selectedGroup->id }}</p>
+                                                        <p class="mt-2 break-all font-mono text-sm text-emerald-300">{{ $selectedGroup->id }}</p>
                                                     </div>
                                                 </div>
 
@@ -306,10 +314,10 @@
                                                 </div>
                                             </div>
 
-                                            <div class="mt-5 grid gap-4 sm:grid-cols-2">
+                                                <div class="mt-5 grid gap-4 md:grid-cols-2">
                                                 <div class="rounded-[24px] border border-slate-200 bg-slate-50 p-4">
                                                     <p class="text-xs uppercase tracking-[0.2em] text-slate-500">Members</p>
-                                                    <div class="mt-3 space-y-3">
+                                                    <div class="mt-3 max-h-[26rem] space-y-3 overflow-auto pr-1">
                                                         @forelse ($selectedGroup->memberships as $membership)
                                                             <div class="flex items-center justify-between rounded-2xl bg-white px-4 py-3 shadow-sm">
                                                                 <div>
@@ -328,7 +336,7 @@
 
                                                 <div class="rounded-[24px] border border-slate-200 bg-slate-50 p-4">
                                                     <p class="text-xs uppercase tracking-[0.2em] text-slate-500">Cycle snapshot</p>
-                                                    <div class="mt-3 space-y-3">
+                                                    <div class="mt-3 max-h-[26rem] space-y-3 overflow-auto pr-1">
                                                         @forelse ($selectedGroup->cycles as $cycle)
                                                             <div class="rounded-2xl bg-white px-4 py-3 shadow-sm">
                                                                 <div class="flex items-center justify-between gap-3">
