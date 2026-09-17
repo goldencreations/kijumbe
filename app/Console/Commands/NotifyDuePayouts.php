@@ -31,7 +31,7 @@ class NotifyDuePayouts extends Command
             ->where('status', RoundStatus::ReadyForPayout->value)
             ->whereDoesntHave('payout')
             ->where('due_at', '<=', now())
-            ->chunkById(50, function ($rounds) use ($whatsapp, $phones, &$created): void {
+            ->chunkById(50, function ($rounds) use ($whatsapp, $phones, $ledger, &$created): void {
                 foreach ($rounds as $round) {
                     $user = $round->recipient?->groupMember?->user;
                     if (! $user || ! $user->is_active) {

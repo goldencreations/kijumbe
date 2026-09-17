@@ -14,8 +14,11 @@ use App\Models\PaymentAttempt;
 use App\Models\User;
 use App\Services\MemberPaymentLedgerService;
 use App\Services\MichezoPayoutSyncService;
+use App\Services\Whatsapp\MetaWhatsAppClient;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Carbon;
+use Illuminate\Support\Facades\Artisan;
+use Mockery;
 use Tests\TestCase;
 
 class MichezoPayoutSyncServiceTest extends TestCase
@@ -25,7 +28,10 @@ class MichezoPayoutSyncServiceTest extends TestCase
     public function test_confirmed_principal_creates_an_eat_payout_round_without_fees_or_penalties(): void
     {
         Carbon::setTestNow(Carbon::parse('2026-09-16 16:20:00', 'Africa/Dar_es_Salaam'));
-        $users = User::factory()->count(2)->create();
+        $users = User::factory()->count(2)->sequence(
+            ['phone' => '255700000001', 'whatsapp_wa_id' => '255700000001'],
+            ['phone' => '255700000002', 'whatsapp_wa_id' => '255700000002'],
+        )->create();
         $group = Group::create([
             'name' => 'Payout sync test',
             'status' => GroupStatus::Active,
@@ -103,6 +109,16 @@ class MichezoPayoutSyncServiceTest extends TestCase
         $this->assertSame($users[0]->id, $round->recipient->groupMember->user_id);
         $this->assertDatabaseCount('contributions', 2);
         $this->assertDatabaseMissing('contributions', ['status' => 'pending']);
+
+        $whatsapp = Mockery::mock(MetaWhatsAppClient::class);
+        $whatsapp->shouldReceive('sendText')->once()->andReturnUsing(fn () => new \App\Models\WhatsappMessage());
+        $this->app->instance(MetaWhatsAppClient::class, $whatsapp);
+        $this->assertSame(0, Artisan::call('kijumbe:notify-due-payouts'));
+        $this->assertDatabaseHas('payouts', [
+            'round_id' => $round->id,
+            'amount' => 400,
+            'status' => 'pending',
+        ]);
         Carbon::setTestNow();
     }
 }
