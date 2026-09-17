@@ -1,3 +1,12 @@
+FROM node:22-bookworm-slim AS frontend
+
+WORKDIR /app
+COPY package.json package-lock.json ./
+RUN npm ci --ignore-scripts
+COPY resources ./resources
+COPY vite.config.js ./
+RUN npm run build
+
 FROM composer:2 AS vendor
 
 WORKDIR /app
@@ -30,6 +39,7 @@ RUN cp "$PHP_INI_DIR/php.ini-production" "$PHP_INI_DIR/php.ini" \
 WORKDIR /app
 
 COPY --from=vendor /app /app
+COPY --from=frontend /app/public/build /app/public/build
 COPY docker/Caddyfile /etc/frankenphp/Caddyfile
 COPY docker/php.ini /usr/local/etc/php/conf.d/99-kijumbe.ini
 

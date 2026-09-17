@@ -2,7 +2,9 @@
 
 namespace App\Http\Requests;
 
+use App\Models\Group;
 use Illuminate\Foundation\Http\FormRequest;
+use Illuminate\Validation\Rule;
 
 class StoreGroupRequest extends FormRequest
 {
@@ -17,6 +19,7 @@ class StoreGroupRequest extends FormRequest
             'name' => ['required', 'string', 'max:120'],
             'description' => ['nullable', 'string', 'max:1000'],
             'language' => ['nullable', 'string', 'max:12'],
+            'group_type' => ['nullable', Rule::in([Group::TYPE_MONEY, Group::TYPE_PRODUCT])],
             'contribution_amount' => ['nullable', 'integer', 'min:0'],
             'currency' => ['nullable', 'string', 'size:3'],
             'period_days' => ['nullable', 'integer', 'min:1'],

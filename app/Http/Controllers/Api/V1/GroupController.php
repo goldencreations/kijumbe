@@ -43,6 +43,7 @@ class GroupController extends Controller
             $creatorPhone = preg_replace('/\D+/', '', (string) ($request->user()->whatsapp_wa_id ?: $request->user()->phone));
             $group = Group::create([
                 ...$validated,
+                'group_type' => Group::normalizeGroupType($validated['group_type'] ?? null),
                 'status' => GroupStatus::Draft,
                 'created_by' => $request->user()->id,
                 'created_by_phone' => $creatorPhone ?: null,

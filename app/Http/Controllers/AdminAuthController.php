@@ -22,7 +22,7 @@ class AdminAuthController extends Controller
             'password' => ['required', 'string'],
         ]);
 
-        if (! Auth::attempt($credentials, $request->boolean('remember'))) {
+        if (! Auth::attempt([...$credentials, 'is_active' => true, 'system_role' => 'admin'], $request->boolean('remember'))) {
             throw ValidationException::withMessages([
                 'email' => __('The provided credentials are incorrect.'),
             ]);

@@ -46,8 +46,25 @@ return [
     ],
 
     'payments' => [
-        'driver' => env('PAYMENT_DRIVER', 'selcom'),
+        'driver' => env('PAYMENT_DRIVER', 'ecofy'),
         'live_enabled' => env('PAYMENTS_LIVE_ENABLED', false),
+    ],
+
+    'ecofy' => [
+        'base_url' => env('ECOFY_BASE_URL', 'https://ecofy.areno.co.tz'),
+        'api_key' => env('ECOFY_API_KEY'),
+        'merchant_id' => env('ECOFY_MERCHANT_ID'),
+        'webhook_secret' => env('ECOFY_WEBHOOK_SECRET'),
+        'webhook_url' => env('ECOFY_WEBHOOK_URL', env('APP_URL').'/api/v1/webhooks/payments/ecofy'),
+        'payout_channel' => env('ECOFY_PAYOUT_CHANNEL', 'MPESA'),
+    ],
+
+    'nextsms' => [
+        'enabled' => env('NEXTSMS_ENABLED', false),
+        'base_url' => env('NEXTSMS_BASE_URL', 'https://messaging-service.co.tz'),
+        'username' => env('NEXTSMS_USERNAME'),
+        'password' => env('NEXTSMS_PASSWORD'),
+        'sender_id' => env('NEXTSMS_SENDER_ID', 'Kijumbe'),
     ],
 
     'selcom' => [

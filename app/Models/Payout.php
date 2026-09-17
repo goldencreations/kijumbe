@@ -6,6 +6,7 @@ use App\Enums\PayoutStatus;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
+use Illuminate\Database\Eloquent\Relations\HasOne;
 
 class Payout extends Model
 {
@@ -53,5 +54,10 @@ class Payout extends Model
     public function approver(): BelongsTo
     {
         return $this->belongsTo(User::class, 'approved_by');
+    }
+
+    public function verification(): HasOne
+    {
+        return $this->hasOne(PayoutVerification::class);
     }
 }

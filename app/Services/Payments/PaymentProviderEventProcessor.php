@@ -8,7 +8,9 @@ use App\Models\PaymentAttempt;
 use App\Models\PaymentProviderEvent;
 use App\Models\Payout;
 use App\Services\ContributionService;
+use App\Services\MemberPaymentLedgerService;
 use App\Services\PayoutService;
+use App\Services\Whatsapp\MetaWhatsAppClient;
 use Illuminate\Support\Carbon;
 use Illuminate\Support\Facades\DB;
 use RuntimeException;
@@ -18,6 +20,8 @@ class PaymentProviderEventProcessor
     public function __construct(
         private readonly ContributionService $contributions,
         private readonly PayoutService $payouts,
+        private readonly MemberPaymentLedgerService $memberPayments,
+        private readonly MetaWhatsAppClient $whatsapp,
     ) {}
 
     public function process(PaymentProviderEvent $event): void
@@ -27,12 +31,17 @@ class PaymentProviderEventProcessor
         }
 
         try {
-            match ($event->event_name) {
-                'PAYMENT RECEIVED' => $this->paymentReceived($event),
-                'PAYMENT FAILED' => $this->paymentFailed($event),
-                'PAYOUT INITIATED' => $this->payoutUpdated($event),
-                'PAYOUT REFUNDED' => $this->payoutException($event, PayoutStatus::Refunded),
-                'PAYOUT REVERSED' => $this->payoutException($event, PayoutStatus::Reversed),
+            $eventName = str_replace('_', ' ', strtolower(trim($event->event_name)));
+
+            match ($eventName) {
+                'payment received', 'payment.received', 'payment.succeeded', 'payment.success', 'payment.successful', 'payment.completed' => $this->paymentReceived($event),
+                'payment failed', 'payment.failed', 'payment.cancelled', 'payment.canceled', 'payment.expired' => $this->paymentFailed($event),
+                'payment.pending', 'payment.processing' => $this->paymentProcessing($event),
+                'payout initiated', 'payout.paid' => $this->payoutUpdated($event),
+                'payout processing', 'payout.processing' => $this->payoutProcessing($event),
+                'payout failed', 'payout.failed' => $this->payoutException($event, PayoutStatus::Failed),
+                'payout refunded', 'payout.refunded' => $this->payoutException($event, PayoutStatus::Refunded),
+                'payout reversed', 'payout.reversed' => $this->payoutException($event, PayoutStatus::Reversed),
                 default => null,
             };
 
@@ -45,7 +54,8 @@ class PaymentProviderEventProcessor
 
     private function paymentReceived(PaymentProviderEvent $event): void
     {
-        DB::transaction(function () use ($event): void {
+        $notificationAttempt = null;
+        DB::transaction(function () use ($event, &$notificationAttempt): void {
             $attempt = PaymentAttempt::query()
                 ->where('order_reference', $event->order_reference)
                 ->lockForUpdate()
@@ -56,8 +66,8 @@ class PaymentProviderEventProcessor
             }
 
             $data = (array) $event->payload['data'];
-            $amount = (int) ($data['collectedAmount'] ?? 0);
-            $currency = strtoupper((string) ($data['collectedCurrency'] ?? ''));
+            $amount = (int) ($data['collectedAmount'] ?? $data['amount'] ?? 0);
+            $currency = strtoupper((string) ($data['collectedCurrency'] ?? $data['currency'] ?? ''));
             if ($amount !== $attempt->amount || $currency !== $attempt->currency) {
                 throw new RuntimeException('Provider payment amount or currency does not match the contribution.');
             }
@@ -67,11 +77,19 @@ class PaymentProviderEventProcessor
                 throw new RuntimeException('Provider payment reference is missing.');
             }
 
+            if ($attempt->payment_scope === 'member_ledger') {
+                $notificationAttempt = $this->memberPayments
+                    ->confirmFromProvider($attempt, $amount, $providerReference, $event->payload)
+                    ->load('initiator');
+
+                return;
+            }
+
             $this->contributions->confirmFromProvider($attempt->contribution, [
                 'payment_reference' => $providerReference,
                 'idempotency_key' => $event->event_key,
-                'paid_at' => isset($data['updatedAt']) ? Carbon::parse($data['updatedAt']) : now(),
-                'notes' => 'Confirmed by authenticated Selcom C2B notification.',
+                'paid_at' => isset($data['updatedAt']) ? Carbon::parse($data['updatedAt']) : (isset($data['created_at']) ? Carbon::parse($data['created_at']) : now()),
+                'notes' => 'Confirmed by authenticated payment provider notification.',
             ]);
 
             $attempt->update([
@@ -79,9 +97,36 @@ class PaymentProviderEventProcessor
                 'provider_reference' => $providerReference,
                 'response_payload' => $event->payload,
                 'completed_at' => now(),
+                'provider_payment_id' => $data['id'] ?? null,
+                'fee' => isset($data['fee']) ? (int) $data['fee'] : null,
+                'net' => isset($data['net']) ? (int) $data['net'] : null,
+                'available_at' => isset($data['available_at']) ? Carbon::parse($data['available_at']) : null,
                 'failure_reason' => null,
             ]);
         }, 3);
+
+        if ($notificationAttempt) {
+            $user = $notificationAttempt->initiator;
+            if ($user) {
+                $this->whatsapp->sendText($user, "Malipo yako ya TZS {$notificationAttempt->amount} yamefanikiwa na yamegawanywa kwenye madeni yako ya zamani kwanza.");
+            }
+        }
+    }
+
+    private function paymentProcessing(PaymentProviderEvent $event): void
+    {
+        PaymentAttempt::query()
+            ->where('order_reference', $event->order_reference)
+            ->whereNotIn('status', [PaymentAttemptStatus::Successful->value, PaymentAttemptStatus::Failed->value])
+            ->update([
+                'status' => PaymentAttemptStatus::Processing->value,
+                'response_payload' => $event->payload,
+                'provider_payment_id' => data_get($event->payload, 'data.id'),
+                'provider_reference' => data_get($event->payload, 'data.reference'),
+                'fee' => data_get($event->payload, 'data.fee'),
+                'net' => data_get($event->payload, 'data.net'),
+                'expires_at' => data_get($event->payload, 'data.expires_at'),
+            ]);
     }
 
     private function paymentFailed(PaymentProviderEvent $event): void
@@ -102,12 +147,25 @@ class PaymentProviderEventProcessor
         $payout = Payout::query()->where('order_reference', $event->order_reference)->firstOrFail();
         $status = strtoupper((string) data_get($event->payload, 'data.status'));
 
-        if ($status === 'SUCCESS') {
+        if (in_array($status, ['PAID', 'SUCCESS', 'SUCCEEDED'], true)) {
             $reference = (string) (data_get($event->payload, 'data.id') ?: $event->provider_reference);
             $this->payouts->completeFromProvider($payout, $reference, $event->payload);
         } elseif ($status === 'FAILED') {
             $this->payouts->markProviderException($payout, PayoutStatus::Failed, $event->payload);
         }
+    }
+
+    private function payoutProcessing(PaymentProviderEvent $event): void
+    {
+        Payout::query()
+            ->where('order_reference', $event->order_reference)
+            ->whereNotIn('status', [PayoutStatus::Paid->value, PayoutStatus::Failed->value])
+            ->update([
+                'status' => PayoutStatus::Processing,
+                'provider_reference' => data_get($event->payload, 'data.id', $event->provider_reference),
+                'response_payload' => $event->payload,
+                'initiated_at' => now(),
+            ]);
     }
 
     private function payoutException(PaymentProviderEvent $event, PayoutStatus $status): void

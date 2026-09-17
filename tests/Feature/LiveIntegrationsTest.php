@@ -170,6 +170,53 @@ class LiveIntegrationsTest extends TestCase
         ]);
     }
 
+    public function test_whatsapp_chat_group_creation_persists_confirmed_fields_and_generated_code(): void
+    {
+        $leader = User::factory()->create([
+            'name' => 'Asha Kijumbe',
+            'phone' => '255700000030',
+            'whatsapp_wa_id' => '255700000030',
+            'is_active' => true,
+            'whatsapp_opted_in_at' => now(),
+        ]);
+        $whatsapp = Mockery::mock(MetaWhatsAppClient::class);
+        $whatsapp->shouldReceive('sendText')->atLeast()->once()->andReturnUsing(fn () => new \App\Models\WhatsappMessage());
+        $this->app->instance(MetaWhatsAppClient::class, $whatsapp);
+
+        $conversation = $this->app->make(WhatsappConversationService::class);
+        $conversation->handle($leader, ['id' => 'wamid.chat.create', 'text' => ['body' => 'UNDA KIKUNDI']]);
+
+        foreach (['Mshikamano', '10', '2', 'Asha Kijumbe', '2000', '1', '3', '2026-09-15', '500', '100', '2'] as $index => $answer) {
+            $conversation->handle($leader, [
+                'id' => 'wamid.chat.'.($index + 1),
+                'text' => ['body' => $answer],
+            ]);
+        }
+
+        $session = \App\Models\WhatsappFlowSession::query()
+            ->where('user_id', $leader->id)
+            ->where('flow_key', WhatsappFlowSessionService::GROUP_CREATION)
+            ->firstOrFail();
+        $this->assertSame('confirmation', $session->step_key);
+
+        $conversation->handle($leader, ['id' => 'wamid.chat.confirm', 'text' => ['body' => 'NDIO']]);
+
+        $group = Group::query()->where('name', 'Mshikamano')->firstOrFail();
+        $this->assertSame('money', $group->group_type);
+        $this->assertSame('Asha Kijumbe', $group->leader_name);
+        $this->assertSame('255700000030', $group->created_by_phone);
+        $this->assertSame('255700000030', $group->leader_phone);
+        $this->assertSame(2000, $group->amount_per_day);
+        $this->assertSame(1, $group->contribution_interval_days);
+        $this->assertSame(3, $group->payout_interval_days);
+        $this->assertSame('daily', $group->payment_frequency);
+        $this->assertSame(500, $group->kijumbe_fee);
+        $this->assertSame(100, $group->penalty_amount);
+        $this->assertSame(2, $group->penalty_timing_hours);
+        $this->assertMatchesRegularExpression('/^MSHIKAMANO-\d{4}$/', $group->group_code);
+        $this->assertNotNull($session->fresh()->completed_at);
+    }
+
     public function test_group_code_flow_allows_join_and_details_with_session_persistence(): void
     {
         $creator = User::factory()->create([
@@ -243,6 +290,83 @@ class LiveIntegrationsTest extends TestCase
         $conversation->handle($creator, ['id' => 'wamid.group.4', 'text' => ['body' => '3']]);
     }
 
+    public function test_group_join_rejects_full_or_started_groups(): void
+    {
+        $user = User::factory()->create([
+            'whatsapp_wa_id' => '255700000020',
+            'phone' => '255700000020',
+            'is_active' => true,
+            'whatsapp_opted_in_at' => now(),
+        ]);
+        $whatsapp = Mockery::mock(MetaWhatsAppClient::class);
+        $whatsapp->shouldReceive('sendText')->times(4)->andReturnUsing(fn () => new \App\Models\WhatsappMessage());
+        $this->app->instance(MetaWhatsAppClient::class, $whatsapp);
+
+        $fullGroup = Group::create([
+            'id' => (string) str()->uuid(),
+            'name' => 'Full Group',
+            'status' => GroupStatus::Draft,
+            'created_by' => $user->id,
+            'created_by_phone' => '255700000020',
+            'created_by_wa_id' => '255700000020',
+            'language' => 'sw',
+            'contribution_amount' => 1000,
+            'currency' => 'TZS',
+            'period_days' => 7,
+            'member_slots' => 1,
+            'cycle_starts_at' => now()->addDay(),
+            'payout_order' => 'fixed',
+        ]);
+        GroupMember::create([
+            'group_id' => $fullGroup->id,
+            'user_id' => $user->id,
+            'role' => GroupRole::Coordinator,
+            'is_active' => true,
+            'joined_at' => now(),
+        ]);
+
+        $member = User::factory()->create([
+            'whatsapp_wa_id' => '255700000021',
+            'phone' => '255700000021',
+            'is_active' => true,
+            'whatsapp_opted_in_at' => now(),
+        ]);
+
+        $conversation = $this->app->make(WhatsappConversationService::class);
+        $conversation->handle($member, ['id' => 'wamid.join.1', 'text' => ['body' => $fullGroup->id]]);
+        $conversation->handle($member, ['id' => 'wamid.join.2', 'text' => ['body' => '1']]);
+
+        \App\Models\WhatsappFlowSession::query()->delete();
+
+        $startedGroup = Group::create([
+            'id' => (string) str()->uuid(),
+            'name' => 'Started Group',
+            'status' => GroupStatus::Draft,
+            'created_by' => $user->id,
+            'created_by_phone' => '255700000020',
+            'created_by_wa_id' => '255700000020',
+            'language' => 'sw',
+            'contribution_amount' => 1000,
+            'currency' => 'TZS',
+            'period_days' => 7,
+            'member_slots' => 10,
+            'cycle_starts_at' => now()->subHour(),
+            'payout_order' => 'fixed',
+        ]);
+
+        $conversation->handle($member, ['id' => 'wamid.join.3', 'text' => ['body' => $startedGroup->id]]);
+        $conversation->handle($member, ['id' => 'wamid.join.4', 'text' => ['body' => '1']]);
+
+        $this->assertDatabaseMissing('group_members', [
+            'group_id' => $fullGroup->id,
+            'user_id' => $member->id,
+        ]);
+        $this->assertDatabaseMissing('group_members', [
+            'group_id' => $startedGroup->id,
+            'user_id' => $member->id,
+        ]);
+    }
+
     public function test_authenticated_selcom_payment_is_posted_exactly_once(): void
     {
         config([
@@ -288,6 +412,59 @@ class LiveIntegrationsTest extends TestCase
             'id' => $contribution->id,
             'payment_reference' => 'SELCOM-RECEIPT-001',
         ]);
+        $this->assertDatabaseCount('payment_provider_events', 1);
+    }
+
+    public function test_signed_ecofy_payment_received_webhook_confirms_the_contribution_idempotently(): void
+    {
+        config(['services.ecofy.webhook_secret' => 'ecofy-webhook-secret']);
+        [$admin, $contribution] = $this->readyContribution();
+
+        $attempt = PaymentAttempt::create([
+            'contribution_id' => $contribution->id,
+            'initiated_by' => $admin->id,
+            'provider' => 'ecofy',
+            'method' => 'mobile_money',
+            'order_reference' => 'KJC-ECOFY-001',
+            'idempotency_key' => 'ecofy-attempt-001',
+            'phone_e164' => '255700000001',
+            'amount' => $contribution->amount,
+            'currency' => 'TZS',
+            'status' => \App\Enums\PaymentAttemptStatus::Processing,
+        ]);
+
+        $payload = [
+            'event' => 'PAYMENT RECEIVED',
+            'data' => [
+                'id' => 'ecofy-payment-001',
+                'reference' => $attempt->order_reference,
+                'paymentReference' => 'ECOFY-RECEIPT-001',
+                'collectedAmount' => $attempt->amount,
+                'collectedCurrency' => 'TZS',
+            ],
+        ];
+        $json = json_encode($payload, JSON_THROW_ON_ERROR);
+        $timestamp = (string) now()->timestamp;
+        $signature = 't='.$timestamp.',v1='.hash_hmac('sha256', $timestamp.'.'.$json, 'ecofy-webhook-secret');
+
+        $this->call('POST', '/api/v1/webhooks/payments/ecofy', [], [], [], [
+            'CONTENT_TYPE' => 'application/json',
+            'HTTP_ECOFY_SIGNATURE' => $signature,
+        ], $json)->assertOk();
+
+        $this->assertSame(ContributionStatus::Paid, $contribution->fresh()->status);
+        $this->assertSame(\App\Enums\PaymentAttemptStatus::Successful, $attempt->fresh()->status);
+        $this->assertDatabaseCount('payment_provider_events', 1);
+        $this->assertDatabaseHas('payment_provider_events', [
+            'event_name' => 'payment received',
+            'processed_at' => now(),
+        ]);
+
+        $this->call('POST', '/api/v1/webhooks/payments/ecofy', [], [], [], [
+            'CONTENT_TYPE' => 'application/json',
+            'HTTP_ECOFY_SIGNATURE' => $signature,
+        ], $json)->assertOk();
+
         $this->assertDatabaseCount('payment_provider_events', 1);
     }
 

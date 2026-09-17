@@ -22,7 +22,7 @@ class PaymentReconciliationService
 
         PaymentAttempt::query()
             ->where('status', PaymentAttemptStatus::Processing->value)
-            ->where('updated_at', '<=', now()->subMinutes(2))
+            ->where('updated_at', '<=', now()->subMinutes(1))
             ->limit($limit)
             ->get()
             ->each(function (PaymentAttempt $attempt) use (&$processed): void {
@@ -33,19 +33,9 @@ class PaymentReconciliationService
                     return;
                 }
 
-                $data = [
-                    'id' => $response['reference'] ?? $attempt->provider_reference ?? $attempt->order_reference,
-                    'status' => $status,
-                    'paymentReference' => $response['reference'] ?? $attempt->provider_reference ?? $attempt->order_reference,
-                    'orderReference' => $attempt->order_reference,
-                    'collectedAmount' => $attempt->amount,
-                    'collectedCurrency' => $attempt->currency,
-                    'updatedAt' => now()->toIso8601ZuluString(),
-                    'message' => $response['message'] ?? null,
-                    'original' => $response,
-                ];
+                $data = $this->providerData($attempt, $response, $status);
                 $event = $this->event(
-                    $status === 'FAILED' ? 'PAYMENT FAILED' : 'PAYMENT RECEIVED',
+                    $status === 'FAILED' ? 'payment.failed' : 'payment.succeeded',
                     $attempt->order_reference,
                     $data,
                 );
@@ -120,6 +110,14 @@ class PaymentReconciliationService
     /** @param array<string, mixed> $response */
     private function status(array $response): ?string
     {
+        if (isset($response['status'])) {
+            return match (strtolower((string) $response['status'])) {
+                'succeeded', 'success' => 'SUCCESS',
+                'failed', 'cancelled', 'canceled' => 'FAILED',
+                default => null,
+            };
+        }
+
         $result = strtoupper((string) ($response['result'] ?? ''));
         $code = (string) ($response['resultcode'] ?? '');
 
@@ -132,5 +130,22 @@ class PaymentReconciliationService
         }
 
         return $code !== '' || $result !== '' ? 'FAILED' : null;
+    }
+
+    /** @param array<string, mixed> $response */
+    private function providerData(PaymentAttempt $attempt, array $response, string $status): array
+    {
+        return [
+            'id' => $response['id'] ?? $attempt->provider_payment_id ?? $attempt->provider_reference ?? $attempt->order_reference,
+            'status' => strtolower($status === 'SUCCESS' ? 'succeeded' : 'failed'),
+            'paymentReference' => $response['reference'] ?? $attempt->provider_reference ?? $attempt->order_reference,
+            'orderReference' => $attempt->order_reference,
+            'amount' => (int) ($response['amount'] ?? $attempt->amount),
+            'currency' => $response['currency'] ?? $attempt->currency,
+            'fee' => $response['fee'] ?? null,
+            'net' => $response['net'] ?? null,
+            'updatedAt' => $response['updated_at'] ?? now()->toIso8601ZuluString(),
+            'original' => $response,
+        ];
     }
 }

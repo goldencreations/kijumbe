@@ -16,7 +16,7 @@ use Laravel\Sanctum\HasApiTokens;
     'name', 'email', 'phone', 'whatsapp_wa_id', 'password', 'system_role', 'is_active',
     'whatsapp_opted_in_at', 'whatsapp_opted_out_at',
 ])]
-#[Hidden(['password', 'remember_token'])]
+#[Hidden(['password', 'remember_token', 'payout_pin_hash'])]
 class User extends Authenticatable
 {
     /** @use HasFactory<UserFactory> */
@@ -46,6 +46,12 @@ class User extends Authenticatable
             'is_active' => 'boolean',
             'whatsapp_opted_in_at' => 'datetime',
             'whatsapp_opted_out_at' => 'datetime',
+            'payout_pin_set_at' => 'datetime',
         ];
+    }
+
+    public function hasPayoutPin(): bool
+    {
+        return filled($this->payout_pin_hash);
     }
 }

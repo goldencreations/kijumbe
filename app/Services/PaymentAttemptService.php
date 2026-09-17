@@ -21,7 +21,13 @@ class PaymentAttemptService
         private readonly AuditService $audit,
     ) {}
 
-    public function initiate(User $actor, Contribution $contribution, string $idempotencyKey): PaymentAttempt
+    public function initiate(
+        User $actor,
+        Contribution $contribution,
+        string $idempotencyKey,
+        ?string $paymentPhone = null,
+        string $method = 'mobile_money',
+    ): PaymentAttempt
     {
         $owner = $contribution->cycleMember->groupMember->user;
         if ($actor->id !== $owner->id) {
@@ -37,7 +43,7 @@ class PaymentAttemptService
             return $existing->load('contribution');
         }
 
-        $attempt = DB::transaction(function () use ($actor, $contribution, $owner, $idempotencyKey): PaymentAttempt {
+        $attempt = DB::transaction(function () use ($actor, $contribution, $owner, $idempotencyKey, $paymentPhone, $method): PaymentAttempt {
             $contribution = Contribution::query()->lockForUpdate()->findOrFail($contribution->id);
 
             if ($contribution->status !== ContributionStatus::Pending) {
@@ -52,17 +58,24 @@ class PaymentAttemptService
                 return $active;
             }
 
-            $phone = $this->phones->toTanzanianWaId($owner->whatsapp_wa_id ?: $owner->phone);
+            $phone = $method === 'mobile_money'
+                ? $this->phones->toTanzanianWaId($paymentPhone ?: $owner->whatsapp_wa_id ?: $owner->phone)
+                : null;
             $attempt = PaymentAttempt::create([
                 'contribution_id' => $contribution->id,
                 'initiated_by' => $actor->id,
                 'provider' => (string) config('services.payments.driver'),
+                'method' => $method,
                 'order_reference' => 'KJC-'.strtoupper(Str::ulid()->toBase32()),
                 'idempotency_key' => $idempotencyKey,
                 'phone_e164' => $phone,
                 'amount' => $contribution->amount,
-                'currency' => 'TZS',
+                'currency' => (string) ($contribution->round->cycle->currency ?: 'TZS'),
                 'status' => PaymentAttemptStatus::Created,
+                'metadata' => [
+                    'group_id' => $contribution->round->cycle->group_id,
+                    'group_name' => $contribution->round->cycle->group->name,
+                ],
             ]);
 
             $this->audit->record('payment.collection_requested', $attempt, $actor, after: $attempt->attributesToArray());

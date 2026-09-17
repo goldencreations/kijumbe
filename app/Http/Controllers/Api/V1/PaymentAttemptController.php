@@ -22,6 +22,8 @@ class PaymentAttemptController extends Controller
             $request->user(),
             $contribution,
             $request->validated('idempotency_key'),
+            $request->validated('payment_phone'),
+            $request->validated('method', 'mobile_money'),
         );
 
         return response()->json(['data' => $attempt], 201);

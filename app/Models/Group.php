@@ -13,26 +13,41 @@ class Group extends Model
 {
     use HasFactory, HasUuids;
 
+    public const TYPE_MONEY = 'money';
+
+    public const TYPE_PRODUCT = 'product';
+
     public $incrementing = false;
 
     protected $keyType = 'string';
 
     protected $fillable = [
         'name',
+        'group_type',
         'description',
         'status',
         'created_by',
         'created_by_phone',
         'created_by_wa_id',
+        'leader_name',
+        'leader_phone',
         'language',
         'contribution_amount',
+        'amount_per_day',
+        'contribution_interval_days',
         'currency',
         'period_days',
+        'payment_frequency',
+        'payout_interval_days',
         'member_slots',
         'cycle_starts_at',
         'payout_order',
         'grace_period_hours',
         'platform_fee_amount',
+        'kijumbe_fee',
+        'penalty_amount',
+        'penalty_timing_hours',
+        'group_code',
         'resolution_threshold_percent',
         'flow_payload',
     ];
@@ -41,15 +56,43 @@ class Group extends Model
     {
         return [
             'status' => GroupStatus::class,
+            'group_type' => 'string',
             'cycle_starts_at' => 'datetime',
             'contribution_amount' => 'integer',
+            'amount_per_day' => 'integer',
+            'contribution_interval_days' => 'integer',
             'member_slots' => 'integer',
             'period_days' => 'integer',
+            'payment_frequency' => 'string',
+            'payout_interval_days' => 'integer',
             'grace_period_hours' => 'integer',
             'platform_fee_amount' => 'integer',
+            'kijumbe_fee' => 'integer',
+            'penalty_amount' => 'integer',
+            'penalty_timing_hours' => 'integer',
             'resolution_threshold_percent' => 'integer',
             'flow_payload' => 'array',
         ];
+    }
+
+    protected static function booted(): void
+    {
+        static::saving(function (self $group): void {
+            $group->group_type = self::normalizeGroupType($group->group_type);
+        });
+    }
+
+    public static function normalizeGroupType(mixed $value): string
+    {
+        return match (strtolower(trim((string) $value))) {
+            self::TYPE_PRODUCT, 'good', 'goods', 'bidhaa' => self::TYPE_PRODUCT,
+            default => self::TYPE_MONEY,
+        };
+    }
+
+    public function getGroupTypeLabelAttribute(): string
+    {
+        return self::normalizeGroupType($this->group_type) === self::TYPE_PRODUCT ? 'Bidhaa' : 'Pesa';
     }
 
     public function creator(): BelongsTo
@@ -65,6 +108,11 @@ class Group extends Model
     public function cycles(): HasMany
     {
         return $this->hasMany(Cycle::class);
+    }
+
+    public function slots(): HasMany
+    {
+        return $this->hasMany(GroupMemberSlot::class);
     }
 
 }

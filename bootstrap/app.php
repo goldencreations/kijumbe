@@ -1,5 +1,6 @@
 <?php
 
+use App\Http\Middleware\EnsureAdminUser;
 use App\Http\Middleware\EnsureUserIsActive;
 use Illuminate\Foundation\Application;
 use Illuminate\Foundation\Configuration\Exceptions;
@@ -15,7 +16,10 @@ return Application::configure(basePath: dirname(__DIR__))
     )
     ->withMiddleware(function (Middleware $middleware): void {
         $middleware->trustProxies(at: '*');
-        $middleware->alias(['active.user' => EnsureUserIsActive::class]);
+        $middleware->alias([
+            'active.user' => EnsureUserIsActive::class,
+            'admin' => EnsureAdminUser::class,
+        ]);
         $middleware->redirectGuestsTo(fn () => route('admin.login'));
     })
     ->withExceptions(function (Exceptions $exceptions): void {

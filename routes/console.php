@@ -15,3 +15,11 @@ Schedule::command('kijumbe:refresh-round-statuses')
 Schedule::command('kijumbe:reconcile-payments')
     ->everyFiveMinutes()
     ->withoutOverlapping();
+
+Schedule::command('kijumbe:notify-due-payouts')
+    ->everyMinute()
+    ->withoutOverlapping();
+
+Schedule::command('kijumbe:notify-contribution-reminders')
+    ->everyMinute()
+    ->withoutOverlapping();

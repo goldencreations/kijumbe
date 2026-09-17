@@ -124,7 +124,7 @@ class PayoutService
 
         $cycle = $round->cycle;
         $unfinished = $cycle->rounds()
-            ->whereNotIn('status', [RoundStatus::Paid->value, RoundStatus::Cancelled->value])
+            ->where('status', '!=', RoundStatus::Paid->value)
             ->exists();
         $hasBlockedRound = $cycle->rounds()->where('status', RoundStatus::Blocked->value)->exists();
         $cycle->update([
