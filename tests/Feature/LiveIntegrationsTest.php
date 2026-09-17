@@ -260,7 +260,7 @@ class LiveIntegrationsTest extends TestCase
         ]);
 
         $whatsapp = Mockery::mock(MetaWhatsAppClient::class);
-        $whatsapp->shouldReceive('sendText')->twice()->andReturnUsing(fn () => new \App\Models\WhatsappMessage());
+        $whatsapp->shouldReceive('sendText')->times(5)->andReturnUsing(fn () => new \App\Models\WhatsappMessage());
         $this->app->instance(MetaWhatsAppClient::class, $whatsapp);
 
         $conversation = $this->app->make(WhatsappConversationService::class);
@@ -273,6 +273,9 @@ class LiveIntegrationsTest extends TestCase
         $this->assertSame('choose_action', $session->step_key);
 
         $conversation->handle($member, ['id' => 'wamid.group.2', 'text' => ['body' => '1']]);
+        $conversation->handle($member, ['id' => 'wamid.group.2a', 'text' => ['body' => 'NDIO']]);
+        $conversation->handle($member, ['id' => 'wamid.group.2b', 'text' => ['body' => 'Amina Member']]);
+        $conversation->handle($member, ['id' => 'wamid.group.2c', 'text' => ['body' => '1']]);
 
         $this->assertDatabaseHas('group_members', [
             'group_id' => $group->id,

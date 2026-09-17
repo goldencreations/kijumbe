@@ -39,7 +39,8 @@ class NotifyDuePayouts extends Command
                     }
 
                     $debt = $ledger->outstandingForUser($user, $round->cycle->group)
-                        ->filter(fn ($obligation): bool => $obligation->due_at?->lte(now()));
+                        ->filter(fn ($obligation): bool => $obligation->round_number <= $round->number
+                            && $obligation->due_at?->lte(now()));
                     if ($debt->isNotEmpty()) {
                         $cacheKey = 'kijumbe:payout-debt-block:'.$user->id.':'.$round->id;
                         if (Cache::add($cacheKey, true, now()->addHours(6))) {

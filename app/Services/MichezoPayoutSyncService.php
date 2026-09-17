@@ -1,0 +1,209 @@
+<?php
+
+namespace App\Services;
+
+use App\Enums\ContributionStatus;
+use App\Enums\CycleMemberStatus;
+use App\Enums\CycleStatus;
+use App\Enums\PaymentAttemptStatus;
+use App\Enums\RoundStatus;
+use App\Models\Contribution;
+use App\Models\Cycle;
+use App\Models\CycleMember;
+use App\Models\Group;
+use App\Models\MemberPaymentObligation;
+use App\Models\Round;
+use Illuminate\Support\Facades\DB;
+
+/**
+ * Projects the authoritative member-payment ledger into payout rounds.
+ *
+ * Fees and penalties remain in the ledger. Only confirmed principal is
+ * copied into contributions and can become part of a payout.
+ */
+class MichezoPayoutSyncService
+{
+    public function sync(Group $group): int
+    {
+        return DB::transaction(function () use ($group): int {
+            $group = Group::query()->lockForUpdate()->findOrFail($group->id);
+            $startsAt = $group->cycle_starts_at?->copy();
+            if (! $startsAt || now()->lt($startsAt)) {
+                return 0;
+            }
+
+            $slots = $group->slots()
+                ->with('groupMember')
+                ->where('status', 'active')
+                ->whereNotNull('payout_position')
+                ->orderBy('payout_position')
+                ->lockForUpdate()
+                ->get();
+
+            if ($slots->isEmpty()) {
+                return 0;
+            }
+
+            $cycle = Cycle::query()->firstOrCreate(
+                ['group_id' => $group->id, 'name' => 'Michezo ledger'],
+                [
+                    'contribution_amount' => (int) ($group->contribution_amount ?? $group->amount_per_day),
+                    'currency' => strtoupper((string) ($group->currency ?: 'TZS')),
+                    'period_days' => max((int) ($group->payout_interval_days ?: 1), 1),
+                    'grace_period_hours' => max((int) ($group->penalty_timing_hours ?? $group->grace_period_hours ?? 0), 0),
+                    'starts_at' => $startsAt,
+                    'member_count' => $slots->count(),
+                    'status' => CycleStatus::Active,
+                    'activated_at' => now(),
+                ],
+            );
+
+            $cycle->update([
+                'contribution_amount' => (int) ($group->contribution_amount ?? $group->amount_per_day),
+                'currency' => strtoupper((string) ($group->currency ?: 'TZS')),
+                'period_days' => max((int) ($group->payout_interval_days ?: 1), 1),
+                'grace_period_hours' => max((int) ($group->penalty_timing_hours ?? $group->grace_period_hours ?? 0), 0),
+                'starts_at' => $startsAt,
+                'member_count' => $slots->count(),
+                'status' => CycleStatus::Active,
+                'activated_at' => $cycle->activated_at ?: now(),
+                'completed_at' => null,
+            ]);
+
+            $cycleMembers = collect();
+            foreach ($slots as $slot) {
+                $cycleMember = CycleMember::query()
+                    ->where('cycle_id', $cycle->id)
+                    ->where('group_member_slot_id', $slot->id)
+                    ->first();
+
+                if (! $cycleMember) {
+                    $cycleMember = CycleMember::query()
+                        ->where('cycle_id', $cycle->id)
+                        ->where('group_member_id', $slot->group_member_id)
+                        ->whereNull('group_member_slot_id')
+                        ->first();
+                }
+
+                $cycleMember ??= new CycleMember(['cycle_id' => $cycle->id]);
+                $cycleMember->fill([
+                    'group_member_id' => $slot->group_member_id,
+                    'group_member_slot_id' => $slot->id,
+                    'payout_position' => $slot->payout_position,
+                    'status' => CycleMemberStatus::Active,
+                ])->save();
+                $cycleMembers->put($slot->id, $cycleMember);
+            }
+
+            $roundNumbers = MemberPaymentObligation::query()
+                ->where('group_id', $group->id)
+                ->distinct()
+                ->orderBy('round_number')
+                ->pluck('round_number');
+
+            $synced = 0;
+            foreach ($roundNumbers as $roundNumber) {
+                $obligations = MemberPaymentObligation::query()
+                    ->with(['allocations.attempt'])
+                    ->where('group_id', $group->id)
+                    ->where('round_number', $roundNumber)
+                    ->whereIn('group_member_slot_id', $slots->pluck('id'))
+                    ->get()
+                    ->keyBy('group_member_slot_id');
+
+                if ($obligations->count() !== $slots->count()) {
+                    continue;
+                }
+
+                $recipientPosition = (($roundNumber - 1) % $slots->count()) + 1;
+                $recipientSlot = $slots->firstWhere('payout_position', $recipientPosition);
+                $recipient = $recipientSlot ? $cycleMembers->get($recipientSlot->id) : null;
+                if (! $recipient) {
+                    continue;
+                }
+
+                $payoutInterval = max((int) ($group->payout_interval_days ?: 1), 1);
+                $roundDueAt = $startsAt->copy()->addDays(($roundNumber - 1) * $payoutInterval);
+                $latestContributionDueAt = $obligations->max('due_at') ?? $roundDueAt;
+                $graceEndsAt = $latestContributionDueAt->copy()->addHours(
+                    max((int) ($group->penalty_timing_hours ?? $group->grace_period_hours ?? 0), 0),
+                );
+
+                $required = 0;
+                $collected = 0;
+                $contributionState = [];
+
+                foreach ($slots as $slot) {
+                    /** @var MemberPaymentObligation $obligation */
+                    $obligation = $obligations->get($slot->id);
+                    $successfulAllocations = $obligation->allocations->filter(
+                        fn ($allocation): bool => $allocation->attempt?->status === PaymentAttemptStatus::Successful,
+                    );
+                    $principalPaid = min(
+                        (int) $obligation->principal_amount,
+                        (int) $successfulAllocations->sum('principal_amount'),
+                    );
+                    $required += (int) $obligation->principal_amount;
+                    $collected += $principalPaid;
+
+                    $latestAttempt = $successfulAllocations
+                        ->sortBy(fn ($allocation) => $allocation->attempt?->completed_at?->getTimestamp() ?? 0)
+                        ->last()?->attempt;
+                    $paidAt = $latestAttempt?->completed_at ?? $obligation->paid_at;
+                    $isPaid = $principalPaid >= (int) $obligation->principal_amount;
+                    $contributionState[$slot->id] = [
+                        'amount' => (int) $obligation->principal_amount,
+                        'status' => $isPaid
+                            ? ($paidAt?->gt($obligation->due_at->copy()->addHours(max((int) ($group->penalty_timing_hours ?? $group->grace_period_hours ?? 0), 0)))
+                                ? ContributionStatus::PaidLate
+                                : ContributionStatus::Paid)
+                            : ContributionStatus::Pending,
+                        'due_at' => $obligation->due_at,
+                        'grace_ends_at' => $obligation->due_at->copy()->addHours(max((int) ($group->penalty_timing_hours ?? $group->grace_period_hours ?? 0), 0)),
+                        'paid_at' => $isPaid ? $paidAt : null,
+                        'payment_reference' => $isPaid ? $latestAttempt?->provider_reference : null,
+                        'idempotency_key' => 'ledger-obligation-'.$obligation->id,
+                        'notes' => 'Synchronized from member payment ledger obligation '.$obligation->id.'.',
+                    ];
+                }
+
+                $fullyFunded = $required > 0 && $collected >= $required;
+                $status = match (true) {
+                    $fullyFunded => RoundStatus::ReadyForPayout,
+                    now()->lt($roundDueAt) => RoundStatus::Scheduled,
+                    now()->lte($graceEndsAt) => RoundStatus::InGrace,
+                    default => RoundStatus::Blocked,
+                };
+
+                $round = Round::query()->firstOrNew([
+                    'cycle_id' => $cycle->id,
+                    'number' => $roundNumber,
+                ]);
+                $roundWasPaid = $round->exists && $round->status === RoundStatus::Paid;
+                $round->fill([
+                    'recipient_cycle_member_id' => $recipient->id,
+                    'due_at' => $roundDueAt,
+                    'grace_ends_at' => $graceEndsAt,
+                    'required_amount' => $required,
+                    'collected_amount' => $collected,
+                    'payout_amount' => $fullyFunded ? $required : 0,
+                    'status' => $roundWasPaid ? RoundStatus::Paid : $status,
+                ])->save();
+
+                foreach ($slots as $slot) {
+                    Contribution::query()->updateOrCreate(
+                        [
+                            'round_id' => $round->id,
+                            'cycle_member_id' => $cycleMembers->get($slot->id)->id,
+                        ],
+                        $contributionState[$slot->id],
+                    );
+                }
+
+                $synced++;
+            }
+
+            return $synced;
+        }, 3);
+    }
+}

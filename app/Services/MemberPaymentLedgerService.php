@@ -21,6 +21,7 @@ class MemberPaymentLedgerService
         private readonly PaymentGateway $gateway,
         private readonly PhoneNumber $phones,
         private readonly AuditService $audit,
+        private readonly MichezoPayoutSyncService $payoutSync,
     ) {}
 
     /** @return Collection<int, Group> */
@@ -149,7 +150,7 @@ class MemberPaymentLedgerService
 
     public function confirmFromProvider(PaymentAttempt $attempt, int $amount, string $reference, array $payload): PaymentAttempt
     {
-        return DB::transaction(function () use ($attempt, $amount, $reference, $payload): PaymentAttempt {
+        $confirmed = DB::transaction(function () use ($attempt, $amount, $reference, $payload): PaymentAttempt {
             $attempt = PaymentAttempt::query()->lockForUpdate()->findOrFail($attempt->id);
             if ($attempt->status === PaymentAttemptStatus::Successful) {
                 return $attempt;
@@ -180,9 +181,18 @@ class MemberPaymentLedgerService
 
             return $attempt->fresh();
         }, 3);
+
+        $groupId = data_get($confirmed->metadata, 'group_id')
+            ?: $confirmed->allocations()->with('obligation')->first()?->obligation?->group_id;
+        if ($groupId && ($group = Group::query()->find($groupId))) {
+            $this->materialize($group);
+            $this->payoutSync->sync($group);
+        }
+
+        return $confirmed;
     }
 
-    private function materialize(Group $group): void
+    public function materialize(Group $group): void
     {
         $startsAt = $group->cycle_starts_at?->copy() ?: now();
         if ($startsAt->isFuture()) {
@@ -190,7 +200,8 @@ class MemberPaymentLedgerService
         }
 
         $interval = max((int) ($group->contribution_interval_days ?: $group->period_days ?: 1), 1);
-        $rounds = $startsAt->startOfDay()->diffInDays(now()->startOfDay()) + 1;
+        $elapsedSeconds = max((int) $startsAt->diffInSeconds(now(), false), 0);
+        $rounds = intdiv($elapsedSeconds, $interval * 86400) + 1;
         $principal = (int) ($group->contribution_amount ?? $group->amount_per_day ?? 0);
         $fee = (int) ($group->kijumbe_fee ?? $group->platform_fee_amount ?? 0);
         $penalty = (int) ($group->penalty_amount ?? 0);
@@ -202,18 +213,26 @@ class MemberPaymentLedgerService
 
         foreach ($group->slots()->where('status', 'active')->get() as $slot) {
             for ($round = 1; $round <= $rounds; $round++) {
-                $dueAt = CarbonImmutable::instance($startsAt->copy()->startOfDay()->addDays(($round - 1) * $interval));
-                $latePenalty = $penalty > 0 && now()->greaterThan($dueAt->addHours($penaltyHours)) ? $penalty : 0;
-                MemberPaymentObligation::query()->updateOrCreate(
-                    ['group_member_slot_id' => $slot->id, 'round_number' => $round],
-                    [
-                        'group_id' => $group->id,
-                        'due_at' => $dueAt,
-                        'principal_amount' => $principal,
-                        'kijumbe_fee_amount' => $fee,
-                        'penalty_amount' => $latePenalty,
-                    ],
-                );
+                $dueAt = CarbonImmutable::instance($startsAt->copy()->addDays(($round - 1) * $interval));
+                $obligation = MemberPaymentObligation::query()->firstOrNew([
+                    'group_member_slot_id' => $slot->id,
+                    'round_number' => $round,
+                ]);
+                $penaltyDeadline = $dueAt->addHours($penaltyHours);
+                $wasPaidLate = $obligation->paid_at?->greaterThan($penaltyDeadline) ?? false;
+                $isStillLate = ! $obligation->paid_at && now()->greaterThan($penaltyDeadline);
+                $latePenalty = $penalty > 0 && ($wasPaidLate || $isStillLate) ? $penalty : 0;
+                $totalDue = $principal + $fee + $latePenalty;
+                $paidAmount = (int) ($obligation->paid_amount ?? 0);
+
+                $obligation->fill([
+                    'group_id' => $group->id,
+                    'due_at' => $dueAt,
+                    'principal_amount' => $principal,
+                    'kijumbe_fee_amount' => $fee,
+                    'penalty_amount' => $latePenalty,
+                    'status' => $paidAmount >= $totalDue ? 'paid' : ($paidAmount > 0 ? 'partial' : 'pending'),
+                ])->save();
             }
         }
     }
@@ -227,16 +246,20 @@ class MemberPaymentLedgerService
     private function splitAllocation(MemberPaymentObligation $obligation, int $amount): array
     {
         $remaining = $amount;
-        $principalOutstanding = max((int) $obligation->principal_amount - (int) $obligation->paid_amount, 0);
+        $successful = $obligation->allocations()
+            ->whereHas('attempt', fn ($query) => $query->where('status', PaymentAttemptStatus::Successful->value));
+        $principalOutstanding = max((int) $obligation->principal_amount - (int) (clone $successful)->sum('principal_amount'), 0);
         $principal = min($remaining, $principalOutstanding);
         $remaining -= $principal;
-        $fee = min($remaining, (int) $obligation->kijumbe_fee_amount);
+        $feeOutstanding = max((int) $obligation->kijumbe_fee_amount - (int) (clone $successful)->sum('kijumbe_fee_amount'), 0);
+        $fee = min($remaining, $feeOutstanding);
         $remaining -= $fee;
+        $penaltyOutstanding = max((int) $obligation->penalty_amount - (int) (clone $successful)->sum('penalty_amount'), 0);
 
         return [
             'principal_amount' => $principal,
             'kijumbe_fee_amount' => $fee,
-            'penalty_amount' => $remaining,
+            'penalty_amount' => min($remaining, $penaltyOutstanding),
         ];
     }
 }

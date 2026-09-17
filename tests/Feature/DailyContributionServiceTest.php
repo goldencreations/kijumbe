@@ -6,6 +6,7 @@ use App\Enums\GroupRole;
 use App\Enums\GroupStatus;
 use App\Models\Group;
 use App\Models\GroupMember;
+use App\Models\GroupMemberSlot;
 use App\Models\User;
 use App\Services\DailyContributionService;
 use Illuminate\Foundation\Testing\RefreshDatabase;
@@ -29,12 +30,19 @@ class DailyContributionServiceTest extends TestCase
             'cycle_starts_at' => '2026-09-06 08:00:00',
             'grace_period_hours' => 24,
         ]);
-        GroupMember::create([
+        $membership = GroupMember::create([
             'group_id' => $group->id,
             'user_id' => $user->id,
             'role' => GroupRole::Coordinator,
             'is_active' => true,
             'joined_at' => now(),
+        ]);
+        GroupMemberSlot::create([
+            'group_id' => $group->id,
+            'group_member_id' => $membership->id,
+            'slot_number' => 1,
+            'payout_position' => 1,
+            'status' => 'active',
         ]);
 
         $service = app(DailyContributionService::class);

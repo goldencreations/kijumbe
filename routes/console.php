@@ -12,6 +12,10 @@ Schedule::command('kijumbe:refresh-round-statuses')
     ->everyMinute()
     ->withoutOverlapping();
 
+Schedule::command('kijumbe:sync-michezo-payouts')
+    ->everyMinute()
+    ->withoutOverlapping();
+
 Schedule::command('kijumbe:reconcile-payments')
     ->everyFiveMinutes()
     ->withoutOverlapping();

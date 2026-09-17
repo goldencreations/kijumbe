@@ -12,7 +12,7 @@ class CycleMember extends Model
 {
     use HasFactory;
 
-    protected $fillable = ['cycle_id', 'group_member_id', 'payout_position', 'status'];
+    protected $fillable = ['cycle_id', 'group_member_id', 'group_member_slot_id', 'payout_position', 'status'];
 
     protected function casts(): array
     {
@@ -30,6 +30,11 @@ class CycleMember extends Model
     public function groupMember(): BelongsTo
     {
         return $this->belongsTo(GroupMember::class);
+    }
+
+    public function slot(): BelongsTo
+    {
+        return $this->belongsTo(GroupMemberSlot::class, 'group_member_slot_id');
     }
 
     public function contributions(): HasMany
