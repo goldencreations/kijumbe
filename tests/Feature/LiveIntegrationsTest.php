@@ -22,6 +22,7 @@ use App\Models\User;
 use App\Models\WhatsappFlowSession;
 use App\Models\WhatsappMessage;
 use App\Models\WhatsappWebhookEvent;
+use App\Services\Payments\PaymentReconciliationService;
 use App\Services\Payments\PayoutSecurityService;
 use App\Services\Whatsapp\MetaWhatsAppClient;
 use App\Services\Whatsapp\WhatsappConversationService;
@@ -638,6 +639,11 @@ class LiveIntegrationsTest extends TestCase
             {
                 return ['id' => 'payout-processing-001', 'status' => 'processing'];
             }
+
+            public function query(Payout $payout): array
+            {
+                return [];
+            }
         };
         $this->app->instance(PayoutGateway::class, $gateway);
 
@@ -740,6 +746,91 @@ class LiveIntegrationsTest extends TestCase
         $this->assertNotSame($keys[0], $keys[1]);
         $this->assertStringStartsWith('payout-quote-KJP-WD-FRESH-QUOTE-001-', $keys[0]);
         $this->assertStringStartsWith('payout-quote-KJP-WD-FRESH-QUOTE-001-', $keys[1]);
+    }
+
+    public function test_processing_ecofy_payout_is_reconciled_to_paid(): void
+    {
+        [, , $round] = $this->readyContribution(withReadyRound: true);
+        $payout = Payout::create([
+            'round_id' => $round->id,
+            'recipient_cycle_member_id' => $round->recipient_cycle_member_id,
+            'amount' => $round->payout_amount,
+            'status' => PayoutStatus::Processing,
+            'provider' => 'ecofy',
+            'provider_reference' => 'po_reconcile_paid_001',
+            'order_reference' => 'KJP-RECONCILE-PAID-001',
+            'idempotency_key' => 'payout-reconcile-paid-001',
+            'initiated_at' => now()->subMinutes(5),
+        ]);
+        $payout->timestamps = false;
+        $payout->forceFill(['updated_at' => now()->subMinutes(5)])->saveQuietly();
+        PayoutVerification::create([
+            'payout_id' => $payout->id,
+            'recipient_user_id' => $round->recipient->groupMember->user_id,
+            'payment_phone' => '255700000001',
+            'otp_hash' => Hash::make('123456'),
+            'otp_expires_at' => now()->addMinutes(5),
+            'status' => 'processing',
+            'expires_at' => now()->addMinutes(15),
+        ]);
+
+        $gateway = new class implements PayoutGateway
+        {
+            public function quote(Payout $payout): array
+            {
+                return [];
+            }
+
+            public function confirm(Payout $payout, string $quoteId): array
+            {
+                return [];
+            }
+
+            public function query(Payout $payout): array
+            {
+                return [
+                    'id' => 'po_reconcile_paid_001',
+                    'status' => 'paid',
+                    'amount' => $payout->amount,
+                    'reference' => $payout->order_reference,
+                ];
+            }
+        };
+        $this->app->instance(PayoutGateway::class, $gateway);
+
+        $this->assertSame(1, app(PaymentReconciliationService::class)->reconcile());
+        $this->assertSame(PayoutStatus::Paid, $payout->fresh()->status);
+        $this->assertNotNull($payout->fresh()->processed_at);
+        $this->assertSame('paid', $payout->fresh()->verification->status);
+    }
+
+    public function test_ecofy_payout_query_uses_authoritative_provider_id(): void
+    {
+        config([
+            'services.payments.live_enabled' => true,
+            'services.ecofy.base_url' => 'https://ecofy.test',
+            'services.ecofy.api_key' => 'test-key',
+            'services.ecofy.merchant_id' => 'test-merchant',
+        ]);
+        Http::fake([
+            'https://ecofy.test/v1/payouts/po_query_001' => Http::response([
+                'id' => 'po_query_001',
+                'status' => 'paid',
+                'amount' => 800,
+                'reference' => 'KJP-WD-QUERY-001',
+            ]),
+        ]);
+        $payout = new Payout([
+            'provider_reference' => 'po_query_001',
+            'order_reference' => 'KJP-WD-QUERY-001',
+        ]);
+
+        $response = app(PayoutGateway::class)->query($payout);
+
+        $this->assertSame('paid', $response['status']);
+        Http::assertSent(fn ($request) => $request->method() === 'GET'
+            && $request->url() === 'https://ecofy.test/v1/payouts/po_query_001'
+            && $request->header('Idempotency-Key') === []);
     }
 
     /** @return array{User, Contribution, Round|null} */

@@ -89,6 +89,7 @@ class PayoutService
                 'response_payload' => $payload,
                 'processed_at' => now(),
             ]);
+            $payout->verification()->update(['status' => 'paid']);
             $this->finalizePaidRound($payout, $round);
             $this->audit->record(
                 'payout.provider_completed',

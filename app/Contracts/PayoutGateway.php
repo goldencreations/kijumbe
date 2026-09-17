@@ -11,4 +11,7 @@ interface PayoutGateway
 
     /** @return array<string, mixed> */
     public function confirm(Payout $payout, string $quoteId): array;
+
+    /** @return array<string, mixed> */
+    public function query(Payout $payout): array;
 }

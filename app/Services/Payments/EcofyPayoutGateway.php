@@ -55,7 +55,24 @@ class EcofyPayoutGateway implements PayoutGateway
         return $response->json();
     }
 
-    private function client(string $idempotencyKey): PendingRequest
+    public function query(Payout $payout): array
+    {
+        if (filled($payout->provider_reference)) {
+            return $this->client()
+                ->get('/v1/payouts/'.rawurlencode((string) $payout->provider_reference))
+                ->throw()
+                ->json();
+        }
+
+        $response = $this->client()
+            ->get('/v1/payouts', ['reference' => $payout->order_reference])
+            ->throw()
+            ->json();
+
+        return is_array($response['data'][0] ?? null) ? $response['data'][0] : [];
+    }
+
+    private function client(?string $idempotencyKey = null): PendingRequest
     {
         if (! config('services.payments.live_enabled')) {
             throw new RuntimeException('Malipo halisi yamezimwa.');
@@ -67,13 +84,16 @@ class EcofyPayoutGateway implements PayoutGateway
             }
         }
 
-        return Http::baseUrl(rtrim((string) config('services.ecofy.base_url'), '/'))
+        $request = Http::baseUrl(rtrim((string) config('services.ecofy.base_url'), '/'))
             ->acceptJson()
             ->asJson()
             ->withToken((string) config('services.ecofy.api_key'))
-            ->withHeaders(['Idempotency-Key' => $idempotencyKey])
             ->timeout(20)
             ->retry(2, 250, null, false);
+
+        return $idempotencyKey
+            ? $request->withHeaders(['Idempotency-Key' => $idempotencyKey])
+            : $request;
     }
 
     private function channel(string $phone): string

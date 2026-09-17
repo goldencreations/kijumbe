@@ -3,6 +3,7 @@
 namespace App\Services\Payments;
 
 use App\Contracts\PaymentGateway;
+use App\Contracts\PayoutGateway;
 use App\Enums\PaymentAttemptStatus;
 use App\Enums\PayoutStatus;
 use App\Models\PaymentAttempt;
@@ -13,6 +14,7 @@ class PaymentReconciliationService
 {
     public function __construct(
         private readonly PaymentGateway $gateway,
+        private readonly PayoutGateway $payoutGateway,
         private readonly PaymentProviderEventProcessor $processor,
     ) {}
 
@@ -49,7 +51,7 @@ class PaymentReconciliationService
             ->limit(max(0, $limit - $processed))
             ->get()
             ->each(function (Payout $payout) use (&$processed): void {
-                $response = $this->first($this->gateway->queryPayout($payout));
+                $response = $this->first($this->payoutGateway->query($payout));
                 $status = $this->status($response);
                 if ($status === null) {
                     return;
@@ -63,7 +65,11 @@ class PaymentReconciliationService
                     'message' => $response['message'] ?? null,
                     'original' => $response,
                 ];
-                $event = $this->event('PAYOUT INITIATED', (string) $payout->order_reference, $data);
+                $event = $this->event(
+                    $status === 'FAILED' ? 'payout.failed' : 'payout.paid',
+                    (string) $payout->order_reference,
+                    $data,
+                );
                 $this->processor->process($event);
                 $processed++;
             });
@@ -112,7 +118,7 @@ class PaymentReconciliationService
     {
         if (isset($response['status'])) {
             return match (strtolower((string) $response['status'])) {
-                'succeeded', 'success' => 'SUCCESS',
+                'paid', 'succeeded', 'success' => 'SUCCESS',
                 'failed', 'cancelled', 'canceled' => 'FAILED',
                 default => null,
             };
