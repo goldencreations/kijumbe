@@ -32,7 +32,7 @@ class GroupFlowService
      * - resolution_threshold_percent / kiwango_cha_uamuzi
      * - language / lugha
      *
-     * @param array<string, mixed> $response
+     * @param  array<string, mixed>  $response
      */
     public function createFromFlow(User $user, array $response): Group
     {
@@ -54,6 +54,7 @@ class GroupFlowService
         $payoutIntervalDays = $this->intOrNull($response, ['payout_interval_days', 'payout_frequency_days', 'siku_za_malipo']);
         $payoutIntervalDays ??= $periodDays;
         $kijumbeFee = $this->intOrNull($response, ['kijumbe_fee', 'platform_fee_amount', 'ada_ya_jukwaa', 'fee']);
+        $platformFeePercent = max(0, min(100, $this->intOrNull($response, ['platform_fee_percent']) ?? (int) config('kijumbe.platform_fee_percent', 30)));
         $penaltyAmount = $this->intOrNull($response, ['penalty_amount', 'faini']);
         $penaltyTimingHours = $this->intOrNull($response, ['penalty_timing_hours', 'penalty_timing', 'muda_wa_faini']);
         $gracePeriodHours = $penaltyTimingHours ?? $this->intOrNull($response, ['grace_period_hours', 'muda_wa_kusamehe', 'grace_hours']);
@@ -81,6 +82,7 @@ class GroupFlowService
             $periodDays,
             $gracePeriodHours,
             $kijumbeFee,
+            $platformFeePercent,
             $penaltyAmount,
             $penaltyTimingHours,
             $resolutionThreshold,
@@ -112,8 +114,8 @@ class GroupFlowService
                 'cycle_starts_at' => $cycleStartsAt,
                 'payout_order' => $payoutOrder !== '' ? $payoutOrder : null,
                 'grace_period_hours' => $gracePeriodHours,
-                'platform_fee_amount' => $kijumbeFee,
                 'kijumbe_fee' => $kijumbeFee,
+                'platform_fee_percent' => $platformFeePercent,
                 'penalty_amount' => $penaltyAmount,
                 'penalty_timing_hours' => $penaltyTimingHours,
                 'group_code' => $groupCode,
@@ -178,8 +180,8 @@ class GroupFlowService
     }
 
     /**
-     * @param array<string, mixed> $response
-     * @param array<int, string> $keys
+     * @param  array<string, mixed>  $response
+     * @param  array<int, string>  $keys
      */
     private function intOrNull(array $response, array $keys): ?int
     {
@@ -196,8 +198,8 @@ class GroupFlowService
     }
 
     /**
-     * @param array<string, mixed> $response
-     * @param array<int, string> $keys
+     * @param  array<string, mixed>  $response
+     * @param  array<int, string>  $keys
      */
     private function parseDate(array $response, array $keys): ?string
     {

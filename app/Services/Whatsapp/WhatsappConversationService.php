@@ -842,7 +842,7 @@ class WhatsappConversationService
                 'contribution_interval_days' => ['contribution_interval_days' => (int) $value, 'period_days' => (int) $value],
                 'payout_interval_days' => ['payout_interval_days' => (int) $value],
                 'cycle_starts_at' => ['cycle_starts_at' => $value],
-                'kijumbe_fee' => ['kijumbe_fee' => (int) $value, 'platform_fee_amount' => (int) $value],
+                'kijumbe_fee' => ['kijumbe_fee' => (int) $value],
                 'penalty_amount' => ['penalty_amount' => (int) $value],
                 'penalty_timing_hours' => ['penalty_timing_hours' => (int) $value, 'grace_period_hours' => (int) $value],
                 default => throw new \RuntimeException('Taarifa hiyo haiwezi kubadilishwa.'),

@@ -2,6 +2,7 @@
 
 namespace Tests\Feature;
 
+use App\Contracts\PaymentGateway;
 use App\Enums\GroupRole;
 use App\Enums\GroupStatus;
 use App\Enums\PaymentAttemptStatus;
@@ -11,7 +12,9 @@ use App\Models\GroupMember;
 use App\Models\GroupMemberSlot;
 use App\Models\PaymentAllocation;
 use App\Models\PaymentAttempt;
+use App\Models\Payout;
 use App\Models\User;
+use App\Models\WhatsappMessage;
 use App\Services\MemberPaymentLedgerService;
 use App\Services\MichezoPayoutSyncService;
 use App\Services\Whatsapp\MetaWhatsAppClient;
@@ -24,6 +27,79 @@ use Tests\TestCase;
 class MichezoPayoutSyncServiceTest extends TestCase
 {
     use RefreshDatabase;
+
+    public function test_kijumbe_fee_is_split_30_percent_to_platform_and_70_percent_to_coordinator(): void
+    {
+        Carbon::setTestNow(Carbon::parse('2026-09-17 09:00:00', 'Africa/Dar_es_Salaam'));
+        $user = User::factory()->create(['phone' => '255700000001', 'whatsapp_wa_id' => '255700000001']);
+        $group = Group::create([
+            'name' => 'Fee split test',
+            'status' => GroupStatus::Active,
+            'created_by' => $user->id,
+            'contribution_amount' => 200,
+            'currency' => 'TZS',
+            'contribution_interval_days' => 1,
+            'cycle_starts_at' => now(),
+            'kijumbe_fee' => 50,
+            'platform_fee_percent' => 30,
+            'penalty_amount' => 50,
+            'penalty_timing_hours' => 2,
+        ]);
+        $membership = GroupMember::create([
+            'group_id' => $group->id,
+            'user_id' => $user->id,
+            'member_name' => $user->name,
+            'majina_count' => 1,
+            'role' => GroupRole::Coordinator,
+            'is_active' => true,
+            'joined_at' => now(),
+        ]);
+        GroupMemberSlot::create([
+            'group_id' => $group->id,
+            'group_member_id' => $membership->id,
+            'slot_number' => 1,
+            'payout_position' => 1,
+            'status' => 'active',
+        ]);
+        $this->app->instance(PaymentGateway::class, new class implements PaymentGateway
+        {
+            public function initiateCollection(PaymentAttempt $attempt): array
+            {
+                return ['id' => 'fee-split-payment'];
+            }
+
+            public function queryCollection(PaymentAttempt $attempt): array
+            {
+                return [];
+            }
+
+            public function initiatePayout(Payout $payout): array
+            {
+                return [];
+            }
+
+            public function queryPayout(Payout $payout): array
+            {
+                return [];
+            }
+        });
+
+        $attempt = app(MemberPaymentLedgerService::class)->initiate(
+            $user,
+            $group->fresh(),
+            250,
+            '0748281701',
+            'fee-split-001',
+        );
+        $allocation = $attempt->allocations()->firstOrFail();
+
+        $this->assertSame(200, $allocation->principal_amount);
+        $this->assertSame(50, $allocation->kijumbe_fee_amount);
+        $this->assertSame(15, $allocation->platform_fee_amount);
+        $this->assertSame(35, $allocation->coordinator_fee_amount);
+        $this->assertSame(0, $allocation->penalty_amount);
+        Carbon::setTestNow();
+    }
 
     public function test_confirmed_principal_creates_an_eat_payout_round_without_fees_or_penalties(): void
     {
@@ -69,6 +145,8 @@ class MichezoPayoutSyncServiceTest extends TestCase
         $ledger->materialize($group);
         $obligations = $group->fresh()->slots()->with('groupMember')->get()
             ->map(fn ($slot) => $slot->obligations()->firstOrFail());
+        $this->assertSame([15, 15], $obligations->pluck('platform_fee_amount')->all());
+        $this->assertSame([35, 35], $obligations->pluck('coordinator_fee_amount')->all());
 
         foreach ($obligations as $index => $obligation) {
             $attempt = PaymentAttempt::create([
@@ -93,6 +171,8 @@ class MichezoPayoutSyncServiceTest extends TestCase
                 'amount' => 250,
                 'principal_amount' => 200,
                 'kijumbe_fee_amount' => 50,
+                'platform_fee_amount' => 15,
+                'coordinator_fee_amount' => 35,
                 'penalty_amount' => 0,
             ]);
             $obligation->update(['paid_amount' => 250, 'status' => 'paid', 'paid_at' => now()]);
@@ -111,7 +191,7 @@ class MichezoPayoutSyncServiceTest extends TestCase
         $this->assertDatabaseMissing('contributions', ['status' => 'pending']);
 
         $whatsapp = Mockery::mock(MetaWhatsAppClient::class);
-        $whatsapp->shouldReceive('sendText')->once()->andReturnUsing(fn () => new \App\Models\WhatsappMessage());
+        $whatsapp->shouldReceive('sendText')->once()->andReturnUsing(fn () => new WhatsappMessage);
         $this->app->instance(MetaWhatsAppClient::class, $whatsapp);
         $this->assertSame(0, Artisan::call('kijumbe:notify-due-payouts'));
         $this->assertDatabaseHas('payouts', [

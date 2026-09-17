@@ -204,7 +204,9 @@ class LiveIntegrationsTest extends TestCase
         $this->assertSame(7, $group->period_days);
         $this->assertSame(10, $group->member_slots);
         $this->assertSame(24, $group->grace_period_hours);
-        $this->assertSame(50, $group->platform_fee_amount);
+        $this->assertSame(15, $group->platform_fee_amount);
+        $this->assertSame(35, $group->coordinator_fee_amount);
+        $this->assertSame(30, $group->platform_fee_percent);
         $this->assertSame(75, $group->resolution_threshold_percent);
         $this->assertDatabaseHas('group_members', [
             'group_id' => $group->id,
@@ -254,6 +256,8 @@ class LiveIntegrationsTest extends TestCase
         $this->assertSame(3, $group->payout_interval_days);
         $this->assertSame('daily', $group->payment_frequency);
         $this->assertSame(500, $group->kijumbe_fee);
+        $this->assertSame(150, $group->platform_fee_amount);
+        $this->assertSame(350, $group->coordinator_fee_amount);
         $this->assertSame(100, $group->penalty_amount);
         $this->assertSame(2, $group->penalty_timing_hours);
         $this->assertMatchesRegularExpression('/^MSHIKAMANO-\d{4}$/', $group->group_code);

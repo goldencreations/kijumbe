@@ -203,7 +203,9 @@ class MemberPaymentLedgerService
         $elapsedSeconds = max((int) $startsAt->diffInSeconds(now(), false), 0);
         $rounds = intdiv($elapsedSeconds, $interval * 86400) + 1;
         $principal = (int) ($group->contribution_amount ?? $group->amount_per_day ?? 0);
-        $fee = (int) ($group->kijumbe_fee ?? $group->platform_fee_amount ?? 0);
+        $fee = (int) ($group->kijumbe_fee ?? 0);
+        $platformPercent = (int) ($group->platform_fee_percent ?? config('kijumbe.platform_fee_percent', 30));
+        [$platformFee, $coordinatorFee] = Group::splitKijumbeFee($fee, $platformPercent);
         $penalty = (int) ($group->penalty_amount ?? 0);
         $penaltyHours = (int) ($group->penalty_timing_hours ?? $group->grace_period_hours ?? 0);
 
@@ -230,6 +232,9 @@ class MemberPaymentLedgerService
                     'due_at' => $dueAt,
                     'principal_amount' => $principal,
                     'kijumbe_fee_amount' => $fee,
+                    'platform_fee_percent' => $platformPercent,
+                    'platform_fee_amount' => $platformFee,
+                    'coordinator_fee_amount' => $coordinatorFee,
                     'penalty_amount' => $latePenalty,
                     'status' => $paidAmount >= $totalDue ? 'paid' : ($paidAmount > 0 ? 'partial' : 'pending'),
                 ])->save();
@@ -242,7 +247,7 @@ class MemberPaymentLedgerService
         return (int) $obligation->principal_amount + (int) $obligation->kijumbe_fee_amount + (int) $obligation->penalty_amount;
     }
 
-    /** @return array{principal_amount: int, kijumbe_fee_amount: int, penalty_amount: int} */
+    /** @return array{principal_amount: int, kijumbe_fee_amount: int, platform_fee_amount: int, coordinator_fee_amount: int, penalty_amount: int} */
     private function splitAllocation(MemberPaymentObligation $obligation, int $amount): array
     {
         $remaining = $amount;
@@ -254,11 +259,17 @@ class MemberPaymentLedgerService
         $feeOutstanding = max((int) $obligation->kijumbe_fee_amount - (int) (clone $successful)->sum('kijumbe_fee_amount'), 0);
         $fee = min($remaining, $feeOutstanding);
         $remaining -= $fee;
+        $feePaidBefore = (int) (clone $successful)->sum('kijumbe_fee_amount');
+        [$platformBefore] = Group::splitKijumbeFee($feePaidBefore, (int) $obligation->platform_fee_percent);
+        [$platformAfter] = Group::splitKijumbeFee($feePaidBefore + $fee, (int) $obligation->platform_fee_percent);
+        $platformFee = $platformAfter - $platformBefore;
         $penaltyOutstanding = max((int) $obligation->penalty_amount - (int) (clone $successful)->sum('penalty_amount'), 0);
 
         return [
             'principal_amount' => $principal,
             'kijumbe_fee_amount' => $fee,
+            'platform_fee_amount' => $platformFee,
+            'coordinator_fee_amount' => $fee - $platformFee,
             'penalty_amount' => min($remaining, $penaltyOutstanding),
         ];
     }

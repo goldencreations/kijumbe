@@ -28,6 +28,7 @@ class StoreGroupRequest extends FormRequest
             'payout_order' => ['nullable', 'string', 'max:32'],
             'grace_period_hours' => ['nullable', 'integer', 'min:0'],
             'platform_fee_amount' => ['nullable', 'integer', 'min:0'],
+            'platform_fee_percent' => ['nullable', 'integer', 'min:0', 'max:100'],
             'resolution_threshold_percent' => ['nullable', 'integer', 'min:1', 'max:100'],
         ];
     }

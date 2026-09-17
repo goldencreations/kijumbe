@@ -3,11 +3,11 @@
 namespace App\Models;
 
 use App\Enums\GroupStatus;
+use Illuminate\Database\Eloquent\Concerns\HasUuids;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
 use Illuminate\Database\Eloquent\Relations\HasMany;
-use Illuminate\Database\Eloquent\Concerns\HasUuids;
 
 class Group extends Model
 {
@@ -45,6 +45,8 @@ class Group extends Model
         'grace_period_hours',
         'platform_fee_amount',
         'kijumbe_fee',
+        'platform_fee_percent',
+        'coordinator_fee_amount',
         'penalty_amount',
         'penalty_timing_hours',
         'group_code',
@@ -68,6 +70,8 @@ class Group extends Model
             'grace_period_hours' => 'integer',
             'platform_fee_amount' => 'integer',
             'kijumbe_fee' => 'integer',
+            'platform_fee_percent' => 'integer',
+            'coordinator_fee_amount' => 'integer',
             'penalty_amount' => 'integer',
             'penalty_timing_hours' => 'integer',
             'resolution_threshold_percent' => 'integer',
@@ -79,6 +83,13 @@ class Group extends Model
     {
         static::saving(function (self $group): void {
             $group->group_type = self::normalizeGroupType($group->group_type);
+            $fee = max((int) ($group->kijumbe_fee ?? $group->platform_fee_amount ?? 0), 0);
+            $percent = max(0, min(100, (int) ($group->platform_fee_percent ?? config('kijumbe.platform_fee_percent', 30))));
+            [$platform, $coordinator] = self::splitKijumbeFee($fee, $percent);
+            $group->kijumbe_fee = $fee;
+            $group->platform_fee_percent = $percent;
+            $group->platform_fee_amount = $platform;
+            $group->coordinator_fee_amount = $coordinator;
         });
     }
 
@@ -88,6 +99,16 @@ class Group extends Model
             self::TYPE_PRODUCT, 'good', 'goods', 'bidhaa' => self::TYPE_PRODUCT,
             default => self::TYPE_MONEY,
         };
+    }
+
+    /** @return array{0: int, 1: int} */
+    public static function splitKijumbeFee(int $fee, int $platformPercent): array
+    {
+        $fee = max($fee, 0);
+        $platformPercent = max(0, min(100, $platformPercent));
+        $platform = intdiv(($fee * $platformPercent) + 50, 100);
+
+        return [$platform, $fee - $platform];
     }
 
     public function getGroupTypeLabelAttribute(): string
@@ -114,5 +135,4 @@ class Group extends Model
     {
         return $this->hasMany(GroupMemberSlot::class);
     }
-
 }
