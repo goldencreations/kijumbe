@@ -18,6 +18,8 @@ class WhatsappFlowSessionService
 
     public const PIN_MANAGEMENT = 'pin_management';
 
+    public const FINANCIAL_REPORT = 'financial_report';
+
     private const RETENTION_DAYS = 30;
 
     public function startGroupCreation(User $user, array $payload = []): WhatsappFlowSession
@@ -43,6 +45,11 @@ class WhatsappFlowSessionService
     public function startPinManagement(User $user, string $stepKey, array $payload = []): WhatsappFlowSession
     {
         return $this->upsert($user, self::PIN_MANAGEMENT, $stepKey, $payload, now()->addHours(1));
+    }
+
+    public function startFinancialReport(User $user, array $payload = []): WhatsappFlowSession
+    {
+        return $this->upsert($user, self::FINANCIAL_REPORT, 'choose_group', $payload, now()->addMinutes(30));
     }
 
     public function resume(User $user, string $flowKey): ?WhatsappFlowSession

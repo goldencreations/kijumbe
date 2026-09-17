@@ -85,8 +85,12 @@ class WhatsappConversationService
         }
 
         if (in_array($command, ['TAARIFA', 'RIPOTI', 'REPORT'], true)) {
-            $this->sendFinancialReports($user);
+            $this->startFinancialReportFlow($user);
 
+            return;
+        }
+
+        if ($this->continueFinancialReportFlow($user, $message)) {
             return;
         }
 
@@ -770,7 +774,7 @@ class WhatsappConversationService
             .'Kwa kujiunga, kulipa, au kuona taarifa za mchezo, tuma msimbo wa mchezo.';
     }
 
-    private function sendFinancialReports(User $user): void
+    private function startFinancialReportFlow(User $user): void
     {
         $groups = $this->financialReports->groupsForUser($user);
         if ($groups->isEmpty()) {
@@ -779,12 +783,92 @@ class WhatsappConversationService
             return;
         }
 
-        foreach ($groups as $group) {
-            $this->sendLongText(
-                $user,
-                $this->financialReports->report($group, $this->financialReports->isCoordinator($user, $group)),
-            );
+        $this->flowSessions->startFinancialReport($user, [
+            'group_ids' => $groups->pluck('id')->values()->all(),
+        ]);
+        $lines = ['Chagua mchezo unaotaka kuona taarifa:'];
+        foreach ($groups as $index => $group) {
+            $lines[] = ($index + 1).". {$group->name}";
         }
+        $lines[] = '';
+        $lines[] = 'Tuma namba ya mchezo.';
+        $this->whatsapp->sendText($user, implode("\n", $lines));
+    }
+
+    /** @param array<string, mixed> $message */
+    private function continueFinancialReportFlow(User $user, array $message): bool
+    {
+        $session = $this->flowSessions->resume($user, WhatsappFlowSessionService::FINANCIAL_REPORT);
+        if (! $session) {
+            return false;
+        }
+
+        $choice = trim((string) (data_get($message, 'text.body') ?? ''));
+        if (! ctype_digit($choice)) {
+            $this->whatsapp->sendText($user, 'Tuma namba ya chaguo lililo kwenye orodha ya taarifa.');
+
+            return true;
+        }
+
+        $payload = $session->payload ?? [];
+        if ($session->step_key === 'choose_group') {
+            $groupIds = array_values((array) ($payload['group_ids'] ?? []));
+            $groupId = $groupIds[((int) $choice) - 1] ?? null;
+            $group = $groupId ? $this->financialReports->groupsForUser($user)->firstWhere('id', $groupId) : null;
+            if (! $group) {
+                $this->whatsapp->sendText($user, 'Chaguo la mchezo si sahihi. Tuma namba iliyo kwenye orodha.');
+
+                return true;
+            }
+
+            $this->flowSessions->advance($session, 'choose_report', ['group_id' => $group->id]);
+            $this->whatsapp->sendText(
+                $user,
+                "Umechagua {$group->name}. Unataka taarifa ipi?\n"
+                ."1. Waliolipa na ambao hawajalipa\n"
+                ."2. Waliopokea marejesho\n"
+                ."3. Ripoti kamili\n\n"
+                .'Tuma 1, 2 au 3.',
+            );
+
+            return true;
+        }
+
+        if ($session->step_key !== 'choose_report') {
+            return false;
+        }
+
+        $reportType = match ($choice) {
+            '1' => 'payments',
+            '2' => 'payouts',
+            '3' => 'full',
+            default => null,
+        };
+        if ($reportType === null) {
+            $this->whatsapp->sendText($user, 'Chaguo la taarifa si sahihi. Tuma 1, 2 au 3.');
+
+            return true;
+        }
+
+        $group = $this->financialReports->groupsForUser($user)->firstWhere('id', $payload['group_id'] ?? null);
+        if (! $group) {
+            $this->flowSessions->complete($session);
+            $this->whatsapp->sendText($user, 'Huwezi tena kuona taarifa za mchezo huu.');
+
+            return true;
+        }
+
+        $this->flowSessions->complete($session);
+        $this->sendLongText(
+            $user,
+            $this->financialReports->report(
+                $group,
+                $this->financialReports->isCoordinator($user, $group),
+                $reportType,
+            ),
+        );
+
+        return true;
     }
 
     private function sendLongText(User $user, string $text): void

@@ -74,7 +74,7 @@ class WhatsappFinancialReportingTest extends TestCase
 
         $messages = [];
         $whatsapp = Mockery::mock(MetaWhatsAppClient::class);
-        $whatsapp->shouldReceive('sendText')->once()->andReturnUsing(function (User $user, string $text) use (&$messages): WhatsappMessage {
+        $whatsapp->shouldReceive('sendText')->times(3)->andReturnUsing(function (User $user, string $text) use (&$messages): WhatsappMessage {
             $messages[] = $text;
 
             return new WhatsappMessage;
@@ -85,7 +85,21 @@ class WhatsappFinancialReportingTest extends TestCase
             'id' => 'wamid.taarifa.1',
             'text' => ['body' => 'TAARIFA'],
         ]);
+        app(WhatsappConversationService::class)->handle($coordinator, [
+            'id' => 'wamid.taarifa.2',
+            'text' => ['body' => '1'],
+        ]);
+        app(WhatsappConversationService::class)->handle($coordinator, [
+            'id' => 'wamid.taarifa.3',
+            'text' => ['body' => '3'],
+        ]);
 
+        $this->assertStringContainsString('Chagua mchezo unaotaka kuona taarifa', $messages[0]);
+        $this->assertStringContainsString('1. Office Report Group', $messages[0]);
+        $this->assertStringContainsString('Unataka taarifa ipi?', $messages[1]);
+        $this->assertStringContainsString('1. Waliolipa na ambao hawajalipa', $messages[1]);
+        $this->assertStringContainsString('2. Waliopokea marejesho', $messages[1]);
+        $this->assertStringContainsString('3. Ripoti kamili', $messages[1]);
         $report = implode("\n", $messages);
         $this->assertStringContainsString('TAARIFA YA Office Report Group', $report);
         $this->assertStringContainsString('Office Member (Jina 1): AMELIPA TZS 250/250', $report);
@@ -216,7 +230,7 @@ class WhatsappFinancialReportingTest extends TestCase
 
         $messages = [];
         $whatsapp = Mockery::mock(MetaWhatsAppClient::class);
-        $whatsapp->shouldReceive('sendText')->once()->andReturnUsing(function (User $user, string $text) use (&$messages): WhatsappMessage {
+        $whatsapp->shouldReceive('sendText')->times(3)->andReturnUsing(function (User $user, string $text) use (&$messages): WhatsappMessage {
             $messages[] = $text;
 
             return new WhatsappMessage;
@@ -226,6 +240,14 @@ class WhatsappFinancialReportingTest extends TestCase
         app(WhatsappConversationService::class)->handle($member, [
             'id' => 'wamid.member.taarifa.1',
             'text' => ['body' => 'TAARIFA'],
+        ]);
+        app(WhatsappConversationService::class)->handle($member, [
+            'id' => 'wamid.member.taarifa.2',
+            'text' => ['body' => '1'],
+        ]);
+        app(WhatsappConversationService::class)->handle($member, [
+            'id' => 'wamid.member.taarifa.3',
+            'text' => ['body' => '3'],
         ]);
 
         $report = implode("\n", $messages);
