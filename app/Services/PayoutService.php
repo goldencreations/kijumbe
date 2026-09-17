@@ -8,7 +8,9 @@ use App\Enums\RoundStatus;
 use App\Models\Payout;
 use App\Models\Round;
 use App\Models\User;
+use App\Services\Whatsapp\MetaWhatsAppClient;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Log;
 use Symfony\Component\HttpKernel\Exception\ConflictHttpException;
 
 class PayoutService
@@ -16,13 +18,14 @@ class PayoutService
     public function __construct(
         private readonly GroupAccess $access,
         private readonly AuditService $audit,
+        private readonly MetaWhatsAppClient $whatsapp,
     ) {}
 
     public function record(User $actor, Round $round, array $data): Payout
     {
         $this->access->ensureManager($actor, $round->cycle->group);
 
-        return DB::transaction(function () use ($actor, $round, $data) {
+        $payout = DB::transaction(function () use ($actor, $round, $data) {
             $round = Round::query()->lockForUpdate()->findOrFail($round->id);
 
             if ($round->status !== RoundStatus::ReadyForPayout) {
@@ -57,17 +60,21 @@ class PayoutService
 
             return $payout->load('recipient.groupMember.user', 'round');
         }, 3);
+
+        $this->notifyOtherMembers($payout);
+
+        return $payout;
     }
 
     /** @param array<string, mixed> $payload */
     public function completeFromProvider(Payout $payout, string $providerReference, array $payload): Payout
     {
-        return DB::transaction(function () use ($payout, $providerReference, $payload): Payout {
+        [$completedPayout, $shouldNotify] = DB::transaction(function () use ($payout, $providerReference, $payload): array {
             $payout = Payout::query()->lockForUpdate()->findOrFail($payout->id);
             $round = Round::query()->lockForUpdate()->findOrFail($payout->round_id);
 
             if ($payout->status === PayoutStatus::Paid) {
-                return $payout;
+                return [$payout, false];
             }
 
             if (! in_array($payout->status, [PayoutStatus::Approved, PayoutStatus::Processing], true)) {
@@ -91,8 +98,14 @@ class PayoutService
                 metadata: ['round_before' => $before, 'round_after' => $round->fresh()->attributesToArray()],
             );
 
-            return $payout->fresh()->load('recipient.groupMember.user', 'round');
+            return [$payout->fresh()->load('recipient.groupMember.user', 'round'), true];
         }, 3);
+
+        if ($shouldNotify) {
+            $this->notifyOtherMembers($completedPayout);
+        }
+
+        return $completedPayout;
     }
 
     /** @param array<string, mixed> $payload */
@@ -133,5 +146,46 @@ class PayoutService
                 : CycleStatus::Completed,
             'completed_at' => $unfinished ? null : now(),
         ]);
+    }
+
+    private function notifyOtherMembers(Payout $payout): void
+    {
+        $payout->loadMissing('round.cycle.group', 'recipient.groupMember.user');
+        $group = $payout->round?->cycle?->group;
+        $recipient = $payout->recipient?->groupMember?->user;
+        if (! $group || ! $recipient) {
+            return;
+        }
+
+        $message = "MAREJESHO YAMELIPWA\n"
+            ."Mchezo: {$group->name}\n"
+            ."Mpokeaji: {$recipient->name}\n"
+            .'Kiasi: TZS '.number_format((int) $payout->amount)."\n"
+            .'Mzunguko: '.($payout->round?->number ?? '-')."\n"
+            .'Muda: '.($payout->processed_at ?: now())->format('d/m/Y H:i')." EAT\n\n"
+            .'Tuma TAARIFA kuona hali ya mchezo wako.';
+
+        $members = User::query()
+            ->whereKeyNot($recipient->id)
+            ->where('is_active', true)
+            ->whereNotNull('whatsapp_opted_in_at')
+            ->whereNull('whatsapp_opted_out_at')
+            ->whereHas('groupMemberships', fn ($query) => $query
+                ->where('group_id', $group->id)
+                ->where('is_active', true))
+            ->get();
+
+        foreach ($members as $member) {
+            try {
+                $this->whatsapp->sendText($member, $message);
+            } catch (\Throwable $exception) {
+                Log::warning('Payout completed but group member WhatsApp notification failed.', [
+                    'payout_id' => $payout->id,
+                    'group_id' => $group->id,
+                    'member_user_id' => $member->id,
+                    'error' => $exception->getMessage(),
+                ]);
+            }
+        }
     }
 }

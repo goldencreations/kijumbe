@@ -17,6 +17,7 @@ use App\Models\User;
 use App\Models\WhatsappMessage;
 use App\Services\MemberPaymentLedgerService;
 use App\Services\Payments\PaymentProviderEventProcessor;
+use App\Services\PayoutService;
 use App\Services\Whatsapp\MetaWhatsAppClient;
 use App\Services\Whatsapp\WhatsappConversationService;
 use Illuminate\Foundation\Testing\RefreshDatabase;
@@ -235,6 +236,53 @@ class WhatsappFinancialReportingTest extends TestCase
         $this->assertStringNotContainsString('Ada ya platform iliyokusanywa', $report);
         $this->assertStringNotContainsString('Ada ya Kijumbe iliyokusanywa', $report);
         $this->assertStringNotContainsString('Private Outsider Group', $report);
+    }
+
+    public function test_all_other_group_members_are_notified_when_a_payout_is_paid(): void
+    {
+        [$group, $coordinator, $member] = $this->groupWithCoordinatorAndMember();
+        $ledger = app(MemberPaymentLedgerService::class);
+        $attempt = $ledger->initiate($member, $group, 250, '0748281701', 'payout-notification-payment');
+        $ledger->confirmFromProvider($attempt, 250, 'PAYOUT-NOTIFICATION-PAID', [
+            'data' => ['id' => 'payout-notification-payment', 'fee' => 0, 'net' => 250],
+        ]);
+
+        $round = Round::query()
+            ->with('recipient.groupMember.user')
+            ->whereHas('cycle', fn ($query) => $query->where('group_id', $group->id))
+            ->firstOrFail();
+        $recipient = $round->recipient->groupMember->user;
+        $otherMember = $recipient->is($coordinator) ? $member : $coordinator;
+        $payout = Payout::create([
+            'round_id' => $round->id,
+            'recipient_cycle_member_id' => $round->recipient_cycle_member_id,
+            'amount' => 400,
+            'status' => PayoutStatus::Processing,
+            'order_reference' => 'PAYOUT-NOTIFICATION-001',
+        ]);
+
+        $messages = [];
+        $whatsapp = Mockery::mock(MetaWhatsAppClient::class);
+        $whatsapp->shouldReceive('sendText')
+            ->once()
+            ->withArgs(function (User $user, string $text) use (&$messages, $otherMember): bool {
+                $messages[] = $text;
+
+                return $user->is($otherMember);
+            })
+            ->andReturn(new WhatsappMessage);
+        $this->app->instance(MetaWhatsAppClient::class, $whatsapp);
+
+        app(PayoutService::class)->completeFromProvider($payout, 'po_notification_001', [
+            'id' => 'po_notification_001',
+            'status' => 'paid',
+        ]);
+
+        $message = implode("\n", $messages);
+        $this->assertStringContainsString('MAREJESHO YAMELIPWA', $message);
+        $this->assertStringContainsString("Mchezo: {$group->name}", $message);
+        $this->assertStringContainsString("Mpokeaji: {$recipient->name}", $message);
+        $this->assertStringContainsString('Kiasi: TZS 400', $message);
     }
 
     /** @return array{Group, User, User} */
