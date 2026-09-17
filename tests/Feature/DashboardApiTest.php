@@ -2,8 +2,17 @@
 
 namespace Tests\Feature;
 
+use App\Contracts\PaymentGateway;
+use App\Enums\GroupRole;
+use App\Enums\GroupStatus;
 use App\Enums\SystemRole;
+use App\Models\Group;
+use App\Models\GroupMember;
+use App\Models\GroupMemberSlot;
+use App\Models\PaymentAttempt;
+use App\Models\Payout;
 use App\Models\User;
+use App\Services\MemberPaymentLedgerService;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Laravel\Sanctum\Sanctum;
 use Tests\TestCase;
@@ -40,5 +49,118 @@ class DashboardApiTest extends TestCase
         $this->getJson('/api/v1/dashboard')->assertForbidden();
         $this->getJson('/api/v1/dashboard/operations')->assertForbidden();
         $this->getJson('/api/v1/dashboard/audit-logs')->assertForbidden();
+    }
+
+    public function test_dashboard_uses_all_successful_payments_and_can_filter_every_total_by_group(): void
+    {
+        $admin = User::factory()->create(['system_role' => SystemRole::Admin]);
+        Sanctum::actingAs($admin);
+        $this->app->instance(PaymentGateway::class, new class implements PaymentGateway
+        {
+            public function initiateCollection(PaymentAttempt $attempt): array
+            {
+                return ['id' => 'dashboard-payment-'.$attempt->id];
+            }
+
+            public function queryCollection(PaymentAttempt $attempt): array
+            {
+                return [];
+            }
+
+            public function initiatePayout(Payout $payout): array
+            {
+                return [];
+            }
+
+            public function queryPayout(Payout $payout): array
+            {
+                return [];
+            }
+        });
+
+        $group = Group::create([
+            'name' => 'Dashboard Totals Group',
+            'status' => GroupStatus::Active,
+            'created_by' => $admin->id,
+            'contribution_amount' => 1000,
+            'currency' => 'TZS',
+            'contribution_interval_days' => 1,
+            'payout_interval_days' => 1,
+            'cycle_starts_at' => now()->subHours(3),
+            'kijumbe_fee' => 100,
+            'platform_fee_percent' => 30,
+            'penalty_amount' => 100,
+            'penalty_timing_hours' => 2,
+        ]);
+        $users = collect([$admin, User::factory()->create(['phone' => '255748281701'])]);
+        foreach ($users as $index => $user) {
+            $membership = GroupMember::create([
+                'group_id' => $group->id,
+                'user_id' => $user->id,
+                'member_name' => $user->name,
+                'role' => $index === 0 ? GroupRole::Coordinator : GroupRole::Member,
+                'is_active' => true,
+                'joined_at' => now(),
+            ]);
+            GroupMemberSlot::create([
+                'group_id' => $group->id,
+                'group_member_id' => $membership->id,
+                'slot_number' => 1,
+                'payout_position' => $index + 1,
+                'status' => 'active',
+            ]);
+        }
+
+        $ledger = app(MemberPaymentLedgerService::class);
+        foreach ($users as $index => $user) {
+            $attempt = $ledger->initiate(
+                $user,
+                $group->fresh(),
+                1200,
+                $user->phone ?: '255700000001',
+                'dashboard-total-payment-'.$index,
+            );
+            $ledger->confirmFromProvider($attempt, 1200, 'DASHBOARD-PAID-'.$index, [
+                'data' => ['id' => 'dashboard-payment-'.$index, 'fee' => 0, 'net' => 1200],
+            ]);
+        }
+
+        $emptyGroup = Group::create([
+            'name' => 'Empty Dashboard Group',
+            'status' => GroupStatus::Active,
+            'created_by' => $admin->id,
+        ]);
+
+        $this->getJson('/api/v1/dashboard')
+            ->assertOk()
+            ->assertJsonPath('data.summary.total_amount', 2400)
+            ->assertJsonPath('data.summary.collected_amount', 2400)
+            ->assertJsonPath('data.summary.principal_collected', 2000)
+            ->assertJsonPath('data.summary.fees_collected', 200)
+            ->assertJsonPath('data.summary.platform_fees_collected', 60)
+            ->assertJsonPath('data.summary.coordinator_fees_collected', 140)
+            ->assertJsonPath('data.summary.penalties_collected', 200)
+            ->assertJsonPath('data.summary.successful_payments', 2);
+
+        $this->getJson('/api/v1/dashboard?group_id='.$group->id)
+            ->assertOk()
+            ->assertJsonPath('data.selected_group_id', $group->id)
+            ->assertJsonPath('data.summary.total_amount', 2400)
+            ->assertJsonCount(1, 'data.group_breakdown')
+            ->assertJsonPath('data.group_breakdown.0.group_id', $group->id)
+            ->assertJsonPath('data.group_breakdown.0.penalties_collected', 200);
+
+        $this->getJson('/api/v1/dashboard?group_id='.$emptyGroup->id)
+            ->assertOk()
+            ->assertJsonPath('data.summary.total_amount', 0)
+            ->assertJsonPath('data.summary.fees_collected', 0)
+            ->assertJsonPath('data.summary.penalties_collected', 0);
+
+        $this->getJson('/api/v1/dashboard/operations?group_id='.$group->id)
+            ->assertOk()
+            ->assertJsonCount(2, 'data.payment_attempts');
+        $this->getJson('/api/v1/dashboard/operations?group_id='.$emptyGroup->id)
+            ->assertOk()
+            ->assertJsonCount(0, 'data.payment_attempts');
     }
 }
