@@ -64,6 +64,10 @@ class LivePayoutService
         $payout = DB::transaction(function () use ($approver, $payout): Payout {
             $payout = Payout::query()->lockForUpdate()->findOrFail($payout->id);
 
+            if ($payout->requested_by === null) {
+                throw new ConflictHttpException('This system-managed payout must be completed by the recipient through the secure WhatsApp POKEA flow.');
+            }
+
             if ($payout->requested_by === $approver->id) {
                 throw new ConflictHttpException('The payout requester cannot approve the same payout.');
             }

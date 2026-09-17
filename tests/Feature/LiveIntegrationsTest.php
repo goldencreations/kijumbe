@@ -3,10 +3,12 @@
 namespace Tests\Feature;
 
 use App\Contracts\PaymentGateway;
+use App\Contracts\PayoutGateway;
 use App\Enums\ContributionStatus;
 use App\Enums\GroupRole;
 use App\Enums\GroupStatus;
 use App\Enums\PaymentAttemptStatus;
+use App\Enums\PayoutStatus;
 use App\Enums\SystemRole;
 use App\Models\Contribution;
 use App\Models\Cycle;
@@ -25,6 +27,7 @@ use App\Services\Whatsapp\WhatsappFlowSessionService;
 use App\Services\Whatsapp\WhatsappWebhookEventProcessor;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Carbon;
+use Illuminate\Support\Facades\Http;
 use Laravel\Sanctum\Sanctum;
 use Mockery;
 use Tests\TestCase;
@@ -555,6 +558,57 @@ class LiveIntegrationsTest extends TestCase
             ->assertOk()
             ->assertJsonPath('data.status', 'processing')
             ->assertJsonPath('data.approved_by', $approver->id);
+    }
+
+    public function test_dashboard_cannot_approve_a_system_managed_whatsapp_payout(): void
+    {
+        [$admin, $contribution, $round] = $this->readyContribution(withReadyRound: true);
+        $payout = Payout::query()->create([
+            'round_id' => $round->id,
+            'recipient_cycle_member_id' => $round->recipient_cycle_member_id,
+            'amount' => $round->payout_amount,
+            'status' => 'pending',
+            'provider' => 'ecofy',
+            'order_reference' => 'KJP-WD-SYSTEM-001',
+            'idempotency_key' => 'KJP-WD-'.$round->id,
+        ]);
+
+        Sanctum::actingAs($admin);
+        $this->postJson("/api/v1/payouts/{$payout->id}/approve")
+            ->assertConflict()
+            ->assertJsonPath('message', 'This system-managed payout must be completed by the recipient through the secure WhatsApp POKEA flow.');
+
+        $this->assertSame(PayoutStatus::Pending, $payout->fresh()->status);
+        $this->assertNull($payout->fresh()->approved_by);
+    }
+
+    public function test_ecofy_quote_explains_insufficient_provider_balance_safely(): void
+    {
+        config([
+            'services.payments.live_enabled' => true,
+            'services.ecofy.base_url' => 'https://ecofy.test',
+            'services.ecofy.api_key' => 'test-key',
+            'services.ecofy.merchant_id' => 'test-merchant',
+        ]);
+        Http::fake([
+            'https://ecofy.test/v1/payouts/quote' => Http::response([
+                'error' => [
+                    'code' => 'insufficient_balance',
+                    'message' => 'payout: insufficient available balance',
+                ],
+            ], 422),
+        ]);
+
+        $payout = new Payout([
+            'amount' => 800,
+            'destination_phone' => '255744330332',
+            'order_reference' => 'KJP-WD-QUOTE-001',
+        ]);
+
+        $this->expectException(\RuntimeException::class);
+        $this->expectExceptionMessage('Malipo yanasubiri salio la Kijumbe liongezwe kwa mtoa huduma. Tafadhali jaribu POKEA baadaye.');
+
+        app(PayoutGateway::class)->quote($payout);
     }
 
     /** @return array{User, Contribution, Round|null} */

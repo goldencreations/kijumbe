@@ -12,12 +12,18 @@ class EcofyPayoutGateway implements PayoutGateway
 {
     public function quote(Payout $payout): array
     {
-        return $this->client('payout-quote-'.$payout->order_reference)->post('/v1/payouts/quote', [
+        $response = $this->client('payout-quote-'.$payout->order_reference)->post('/v1/payouts/quote', [
             'amount' => (int) $payout->amount,
             'type' => 'mobile_money',
             'channel' => $this->channel($payout->destination_phone),
             'account' => $payout->destination_phone,
-        ])->throw()->json();
+        ]);
+
+        if ($response->status() === 422 && data_get($response->json(), 'error.code') === 'insufficient_balance') {
+            throw new RuntimeException('Malipo yanasubiri salio la Kijumbe liongezwe kwa mtoa huduma. Tafadhali jaribu POKEA baadaye.');
+        }
+
+        return $response->throw()->json();
     }
 
     public function confirm(Payout $payout, string $quoteId): array
@@ -47,7 +53,7 @@ class EcofyPayoutGateway implements PayoutGateway
             ->withToken((string) config('services.ecofy.api_key'))
             ->withHeaders(['Idempotency-Key' => $idempotencyKey])
             ->timeout(20)
-            ->retry(2, 250);
+            ->retry(2, 250, null, false);
     }
 
     private function channel(string $phone): string
