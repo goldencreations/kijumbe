@@ -45,7 +45,9 @@ class WhatsappWebhookEventProcessor
         }
 
         $name = (string) ($status['status'] ?? 'unknown');
-        $at = isset($status['timestamp']) ? Carbon::createFromTimestamp((int) $status['timestamp']) : now();
+        $at = isset($status['timestamp'])
+            ? Carbon::createFromTimestamp((int) $status['timestamp'], config('app.timezone'))
+            : now();
         $updates = ['status' => $name, 'payload' => ['message' => $message->payload, 'status' => $status]];
         if ($name === 'delivered') {
             $updates['delivered_at'] = $at;
@@ -119,7 +121,7 @@ class WhatsappWebhookEventProcessor
     }
 
     /**
-     * @param array<string, mixed> $message
+     * @param  array<string, mixed>  $message
      * @return array<string, mixed>|null
      */
     private function extractFlowResponse(array $message): ?array
@@ -149,7 +151,7 @@ class WhatsappWebhookEventProcessor
     /**
      * Store every inbound sender, even if they are not an existing user.
      *
-     * @param array<string, mixed> $message
+     * @param  array<string, mixed>  $message
      */
     private function upsertInboundContact(string $waId, string $messageId, string $phoneNumberId, array $message): void
     {

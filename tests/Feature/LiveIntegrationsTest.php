@@ -16,9 +16,13 @@ use App\Models\PaymentAttempt;
 use App\Models\Payout;
 use App\Models\Round;
 use App\Models\User;
+use App\Models\WhatsappFlowSession;
+use App\Models\WhatsappMessage;
+use App\Models\WhatsappWebhookEvent;
 use App\Services\Whatsapp\MetaWhatsAppClient;
 use App\Services\Whatsapp\WhatsappConversationService;
 use App\Services\Whatsapp\WhatsappFlowSessionService;
+use App\Services\Whatsapp\WhatsappWebhookEventProcessor;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Carbon;
 use Laravel\Sanctum\Sanctum;
@@ -92,6 +96,42 @@ class LiveIntegrationsTest extends TestCase
         ]);
     }
 
+    public function test_meta_status_timestamps_are_stored_in_eat_and_can_be_repaired(): void
+    {
+        config(['app.timezone' => 'Africa/Dar_es_Salaam']);
+
+        $message = WhatsappMessage::query()->create([
+            'direction' => 'outgoing',
+            'meta_message_id' => 'wamid.eat.1',
+            'wa_id' => '255700000001',
+            'message_type' => 'text',
+            'status' => 'sent',
+        ]);
+        $event = WhatsappWebhookEvent::query()->create([
+            'event_key' => hash('sha256', 'wamid.eat.1:delivered'),
+            'event_type' => 'status',
+            'meta_message_id' => 'wamid.eat.1',
+            'payload' => [
+                'status' => [
+                    'id' => 'wamid.eat.1',
+                    'status' => 'delivered',
+                    'timestamp' => '1789668920', // 2026-09-17 18:15:20 UTC / 21:15:20 EAT
+                ],
+            ],
+        ]);
+
+        app(WhatsappWebhookEventProcessor::class)->process($event);
+
+        $this->assertSame('2026-09-17 21:15:20', $message->fresh()->getRawOriginal('delivered_at'));
+
+        $message->update(['delivered_at' => '2026-09-17 18:15:20']);
+        $this->artisan('kijumbe:repair-whatsapp-status-times', ['--message' => 'wamid.eat.1'])
+            ->expectsOutput('Repaired 1 WhatsApp status timestamp(s); 0 event(s) had no matching message.')
+            ->assertSuccessful();
+
+        $this->assertSame('2026-09-17 21:15:20', $message->fresh()->getRawOriginal('delivered_at'));
+    }
+
     public function test_whatsapp_flow_reply_creates_and_stores_a_group(): void
     {
         $admin = User::factory()->create(['system_role' => SystemRole::Admin, 'whatsapp_wa_id' => '255700000001', 'is_active' => true, 'whatsapp_opted_in_at' => now()]);
@@ -99,7 +139,7 @@ class LiveIntegrationsTest extends TestCase
         $whatsapp = Mockery::mock(MetaWhatsAppClient::class);
         $whatsapp->shouldReceive('sendText')->once()->withArgs(function (User $user, string $text) use ($admin) {
             return $user->is($admin) && str_contains($text, 'kimehifadhiwa vizuri');
-        })->andReturnUsing(fn () => new \App\Models\WhatsappMessage());
+        })->andReturnUsing(fn () => new WhatsappMessage);
         $this->app->instance(MetaWhatsAppClient::class, $whatsapp);
 
         $payload = [
@@ -180,7 +220,7 @@ class LiveIntegrationsTest extends TestCase
             'whatsapp_opted_in_at' => now(),
         ]);
         $whatsapp = Mockery::mock(MetaWhatsAppClient::class);
-        $whatsapp->shouldReceive('sendText')->atLeast()->once()->andReturnUsing(fn () => new \App\Models\WhatsappMessage());
+        $whatsapp->shouldReceive('sendText')->atLeast()->once()->andReturnUsing(fn () => new WhatsappMessage);
         $this->app->instance(MetaWhatsAppClient::class, $whatsapp);
 
         $conversation = $this->app->make(WhatsappConversationService::class);
@@ -193,7 +233,7 @@ class LiveIntegrationsTest extends TestCase
             ]);
         }
 
-        $session = \App\Models\WhatsappFlowSession::query()
+        $session = WhatsappFlowSession::query()
             ->where('user_id', $leader->id)
             ->where('flow_key', WhatsappFlowSessionService::GROUP_CREATION)
             ->firstOrFail();
@@ -260,13 +300,13 @@ class LiveIntegrationsTest extends TestCase
         ]);
 
         $whatsapp = Mockery::mock(MetaWhatsAppClient::class);
-        $whatsapp->shouldReceive('sendText')->times(5)->andReturnUsing(fn () => new \App\Models\WhatsappMessage());
+        $whatsapp->shouldReceive('sendText')->times(5)->andReturnUsing(fn () => new WhatsappMessage);
         $this->app->instance(MetaWhatsAppClient::class, $whatsapp);
 
         $conversation = $this->app->make(WhatsappConversationService::class);
         $conversation->handle($member, ['id' => 'wamid.group.1', 'text' => ['body' => $group->id]]);
 
-        $session = \App\Models\WhatsappFlowSession::query()
+        $session = WhatsappFlowSession::query()
             ->where('user_id', $member->id)
             ->where('flow_key', WhatsappFlowSessionService::GROUP_ACTION)
             ->firstOrFail();
@@ -285,7 +325,7 @@ class LiveIntegrationsTest extends TestCase
         ]);
 
         $creatorWhatsapp = Mockery::mock(MetaWhatsAppClient::class);
-        $creatorWhatsapp->shouldReceive('sendText')->twice()->andReturnUsing(fn () => new \App\Models\WhatsappMessage());
+        $creatorWhatsapp->shouldReceive('sendText')->twice()->andReturnUsing(fn () => new WhatsappMessage);
         $this->app->instance(MetaWhatsAppClient::class, $creatorWhatsapp);
 
         $conversation = $this->app->make(WhatsappConversationService::class);
@@ -302,7 +342,7 @@ class LiveIntegrationsTest extends TestCase
             'whatsapp_opted_in_at' => now(),
         ]);
         $whatsapp = Mockery::mock(MetaWhatsAppClient::class);
-        $whatsapp->shouldReceive('sendText')->times(4)->andReturnUsing(fn () => new \App\Models\WhatsappMessage());
+        $whatsapp->shouldReceive('sendText')->times(4)->andReturnUsing(fn () => new WhatsappMessage);
         $this->app->instance(MetaWhatsAppClient::class, $whatsapp);
 
         $fullGroup = Group::create([
@@ -339,7 +379,7 @@ class LiveIntegrationsTest extends TestCase
         $conversation->handle($member, ['id' => 'wamid.join.1', 'text' => ['body' => $fullGroup->id]]);
         $conversation->handle($member, ['id' => 'wamid.join.2', 'text' => ['body' => '1']]);
 
-        \App\Models\WhatsappFlowSession::query()->delete();
+        WhatsappFlowSession::query()->delete();
 
         $startedGroup = Group::create([
             'id' => (string) str()->uuid(),
@@ -433,7 +473,7 @@ class LiveIntegrationsTest extends TestCase
             'phone_e164' => '255700000001',
             'amount' => $contribution->amount,
             'currency' => 'TZS',
-            'status' => \App\Enums\PaymentAttemptStatus::Processing,
+            'status' => PaymentAttemptStatus::Processing,
         ]);
 
         $payload = [
@@ -456,7 +496,7 @@ class LiveIntegrationsTest extends TestCase
         ], $json)->assertOk();
 
         $this->assertSame(ContributionStatus::Paid, $contribution->fresh()->status);
-        $this->assertSame(\App\Enums\PaymentAttemptStatus::Successful, $attempt->fresh()->status);
+        $this->assertSame(PaymentAttemptStatus::Successful, $attempt->fresh()->status);
         $this->assertDatabaseCount('payment_provider_events', 1);
         $this->assertDatabaseHas('payment_provider_events', [
             'event_name' => 'payment received',
