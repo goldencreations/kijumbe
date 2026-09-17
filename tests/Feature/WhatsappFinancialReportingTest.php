@@ -5,12 +5,14 @@ namespace Tests\Feature;
 use App\Contracts\PaymentGateway;
 use App\Enums\GroupRole;
 use App\Enums\GroupStatus;
+use App\Enums\PayoutStatus;
 use App\Models\Group;
 use App\Models\GroupMember;
 use App\Models\GroupMemberSlot;
 use App\Models\PaymentAttempt;
 use App\Models\PaymentProviderEvent;
 use App\Models\Payout;
+use App\Models\Round;
 use App\Models\User;
 use App\Models\WhatsappMessage;
 use App\Services\MemberPaymentLedgerService;
@@ -178,6 +180,61 @@ class WhatsappFinancialReportingTest extends TestCase
         $this->assertStringContainsString('Umelipiwa na namba: 0713456789', $beneficiaryMessage);
         $this->assertNotEmpty($messages[$payer->id] ?? []);
         $this->assertNotEmpty($messages[$coordinator->id] ?? []);
+    }
+
+    public function test_member_can_request_payment_and_payout_report_only_for_their_groups(): void
+    {
+        [$group, $coordinator, $member] = $this->groupWithCoordinatorAndMember();
+        $ledger = app(MemberPaymentLedgerService::class);
+        $attempt = $ledger->initiate($member, $group, 250, '0748281701', 'member-report-payment-001');
+        $ledger->confirmFromProvider($attempt, 250, 'MEMBER-REPORT-PAID-001', [
+            'data' => ['id' => 'member-report-payment', 'fee' => 0, 'net' => 250],
+        ]);
+
+        $round = Round::query()
+            ->whereHas('cycle', fn ($query) => $query->where('group_id', $group->id))
+            ->firstOrFail();
+        Payout::create([
+            'round_id' => $round->id,
+            'recipient_cycle_member_id' => $round->recipient_cycle_member_id,
+            'amount' => 400,
+            'status' => PayoutStatus::Paid,
+            'payment_reference' => 'MEMBER-REPORT-PAYOUT-001',
+            'processed_at' => now(),
+        ]);
+
+        $outsider = User::factory()->create();
+        Group::create([
+            'name' => 'Private Outsider Group',
+            'status' => GroupStatus::Active,
+            'created_by' => $outsider->id,
+            'contribution_amount' => 100,
+            'currency' => 'TZS',
+            'cycle_starts_at' => now(),
+        ]);
+
+        $messages = [];
+        $whatsapp = Mockery::mock(MetaWhatsAppClient::class);
+        $whatsapp->shouldReceive('sendText')->once()->andReturnUsing(function (User $user, string $text) use (&$messages): WhatsappMessage {
+            $messages[] = $text;
+
+            return new WhatsappMessage;
+        });
+        $this->app->instance(MetaWhatsAppClient::class, $whatsapp);
+
+        app(WhatsappConversationService::class)->handle($member, [
+            'id' => 'wamid.member.taarifa.1',
+            'text' => ['body' => 'TAARIFA'],
+        ]);
+
+        $report = implode("\n", $messages);
+        $this->assertStringContainsString('TAARIFA YA Office Report Group', $report);
+        $this->assertStringContainsString('Office Member (Jina 1): AMELIPA TZS 250/250', $report);
+        $this->assertStringContainsString('Office Coordinator (Jina 1): HAJALIPA', $report);
+        $this->assertStringContainsString('Office Coordinator AMEPOKEA TZS 400', $report);
+        $this->assertStringNotContainsString('Ada ya platform iliyokusanywa', $report);
+        $this->assertStringNotContainsString('Ada ya Kijumbe iliyokusanywa', $report);
+        $this->assertStringNotContainsString('Private Outsider Group', $report);
     }
 
     /** @return array{Group, User, User} */

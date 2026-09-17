@@ -34,6 +34,34 @@ class GroupFinancialReportService
             ->get();
     }
 
+    /** @return Collection<int, Group> */
+    public function groupsForUser(User $user): Collection
+    {
+        return Group::query()
+            ->where(function ($query) use ($user): void {
+                $query->where('created_by', $user->id)
+                    ->orWhereHas('memberships', fn ($membership) => $membership
+                        ->where('user_id', $user->id)
+                        ->where('is_active', true));
+            })
+            ->whereNotIn('status', ['archived'])
+            ->orderBy('name')
+            ->get();
+    }
+
+    public function isCoordinator(User $user, Group $group): bool
+    {
+        if ((string) $group->created_by === (string) $user->id) {
+            return true;
+        }
+
+        return $group->memberships()
+            ->where('user_id', $user->id)
+            ->where('role', GroupRole::Coordinator->value)
+            ->where('is_active', true)
+            ->exists();
+    }
+
     /** @return Collection<int, User> */
     public function coordinators(Group $group): Collection
     {

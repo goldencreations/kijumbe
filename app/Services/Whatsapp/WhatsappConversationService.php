@@ -84,7 +84,7 @@ class WhatsappConversationService
         }
 
         if (in_array($command, ['TAARIFA', 'RIPOTI', 'REPORT'], true)) {
-            $this->sendCoordinatorFinancialReports($user);
+            $this->sendFinancialReports($user);
 
             return;
         }
@@ -632,7 +632,10 @@ class WhatsappConversationService
             }
 
             $this->flowSessions->complete($session);
-            $this->whatsapp->sendText($user, $this->groupMembers->summary($group));
+            $this->sendLongText(
+                $user,
+                $this->financialReports->report($group, $this->financialReports->isCoordinator($user, $group)),
+            );
 
             return true;
         }
@@ -761,22 +764,25 @@ class WhatsappConversationService
             ."POKEA - Pokea marejesho yako siku yako ikifika\n"
             ."NAMBA YA SIRI - Weka au badili namba ya siri ya kupokea fedha\n"
             ."STATUS - Angalia mchango unaodaiwa\n"
-            ."TAARIFA - Pata ripoti ya malipo ya mchezo unaoratibu\n"
+            ."TAARIFA - Pata ripoti ya waliolipa na waliopokea kwenye michezo yako\n"
             ."KATISHA - Futa mchakato unaoendelea\n\n"
             .'Kwa kujiunga, kulipa, au kuona taarifa za mchezo, tuma msimbo wa mchezo.';
     }
 
-    private function sendCoordinatorFinancialReports(User $user): void
+    private function sendFinancialReports(User $user): void
     {
-        $groups = $this->financialReports->coordinatorGroups($user);
+        $groups = $this->financialReports->groupsForUser($user);
         if ($groups->isEmpty()) {
-            $this->whatsapp->sendText($user, 'Huna mchezo unaouratibu kwa sasa.');
+            $this->whatsapp->sendText($user, 'Huna mchezo unaoshiriki kwa sasa.');
 
             return;
         }
 
         foreach ($groups as $group) {
-            $this->sendLongText($user, $this->financialReports->report($group, true));
+            $this->sendLongText(
+                $user,
+                $this->financialReports->report($group, $this->financialReports->isCoordinator($user, $group)),
+            );
         }
     }
 
