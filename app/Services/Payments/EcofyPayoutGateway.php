@@ -7,13 +7,14 @@ use App\Models\Payout;
 use Illuminate\Http\Client\PendingRequest;
 use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Facades\Log;
+use Illuminate\Support\Str;
 use RuntimeException;
 
 class EcofyPayoutGateway implements PayoutGateway
 {
     public function quote(Payout $payout): array
     {
-        $response = $this->client('payout-quote-'.$payout->order_reference)->post('/v1/payouts/quote', [
+        $response = $this->client('payout-quote-'.$payout->order_reference.'-'.Str::ulid())->post('/v1/payouts/quote', [
             'amount' => (int) $payout->amount,
             'type' => 'mobile_money',
             'channel' => $this->channel($payout->destination_phone),

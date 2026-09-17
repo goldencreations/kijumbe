@@ -38,7 +38,10 @@ class PayoutSecurityService
         $phone = $this->phones->toTanzanianWaId($paymentPhone);
         $otp = (string) random_int(100000, 999999);
 
-        $payout->update(['destination_phone' => $phone]);
+        $payout->update([
+            'destination_phone' => $phone,
+            'failure_reason' => null,
+        ]);
 
         $verification = PayoutVerification::updateOrCreate(
             ['payout_id' => $payout->id],
@@ -52,6 +55,11 @@ class PayoutSecurityService
                 'pin_verified_at' => null,
                 'status' => 'otp_sent',
                 'expires_at' => now()->addMinutes(self::VERIFICATION_TTL_MINUTES),
+                'payment_quote_id' => null,
+                'payment_quote_name' => null,
+                'payment_quote_fee' => 0,
+                'payment_quote_total' => 0,
+                'payment_quote_expires_at' => null,
             ],
         );
 

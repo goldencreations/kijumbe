@@ -706,6 +706,42 @@ class LiveIntegrationsTest extends TestCase
         app(PayoutGateway::class)->confirm($payout, 'quote-001');
     }
 
+    public function test_each_new_ecofy_quote_uses_a_fresh_idempotency_key(): void
+    {
+        config([
+            'services.payments.live_enabled' => true,
+            'services.ecofy.base_url' => 'https://ecofy.test',
+            'services.ecofy.api_key' => 'test-key',
+            'services.ecofy.merchant_id' => 'test-merchant',
+        ]);
+        Http::fake([
+            'https://ecofy.test/v1/payouts/quote' => Http::response([
+                'id' => 'quote-fresh',
+                'account_name' => 'TEST RECIPIENT',
+                'fee' => 20,
+                'total' => 820,
+                'expires_at' => now()->addMinutes(10)->utc()->toIso8601String(),
+            ]),
+        ]);
+        $payout = new Payout([
+            'amount' => 800,
+            'destination_phone' => '255744330332',
+            'order_reference' => 'KJP-WD-FRESH-QUOTE-001',
+        ]);
+
+        app(PayoutGateway::class)->quote($payout);
+        app(PayoutGateway::class)->quote($payout);
+
+        $keys = Http::recorded()
+            ->map(fn (array $pair) => $pair[0]->header('Idempotency-Key')[0] ?? null)
+            ->filter()
+            ->values();
+        $this->assertCount(2, $keys);
+        $this->assertNotSame($keys[0], $keys[1]);
+        $this->assertStringStartsWith('payout-quote-KJP-WD-FRESH-QUOTE-001-', $keys[0]);
+        $this->assertStringStartsWith('payout-quote-KJP-WD-FRESH-QUOTE-001-', $keys[1]);
+    }
+
     /** @return array{User, Contribution, Round|null} */
     private function readyContribution(bool $withReadyRound = false): array
     {
