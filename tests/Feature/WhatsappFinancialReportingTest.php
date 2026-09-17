@@ -132,6 +132,54 @@ class WhatsappFinancialReportingTest extends TestCase
         $this->assertNotEmpty($messages[$member->id] ?? []);
     }
 
+    public function test_beneficiary_is_notified_when_another_person_pays_for_them(): void
+    {
+        [$group, $coordinator, $beneficiary] = $this->groupWithCoordinatorAndMember();
+        $payer = User::factory()->create([
+            'name' => 'Helpful Payer',
+            'phone' => '255713456789',
+            'whatsapp_wa_id' => '255713456789',
+            'is_active' => true,
+            'whatsapp_opted_in_at' => now(),
+        ]);
+        $attempt = app(MemberPaymentLedgerService::class)
+            ->initiate($payer, $group, 250, '0713456789', 'report-payment-for-other-001', $beneficiary);
+
+        $messages = [];
+        $whatsapp = Mockery::mock(MetaWhatsAppClient::class);
+        $whatsapp->shouldReceive('sendText')->times(3)->andReturnUsing(function (User $user, string $text) use (&$messages): WhatsappMessage {
+            $messages[$user->id][] = $text;
+
+            return new WhatsappMessage;
+        });
+        $this->app->instance(MetaWhatsAppClient::class, $whatsapp);
+
+        $event = PaymentProviderEvent::create([
+            'provider' => 'ecofy',
+            'event_key' => 'report-event-for-other-001',
+            'event_name' => 'PAYMENT RECEIVED',
+            'order_reference' => $attempt->order_reference,
+            'verified' => true,
+            'payload' => [
+                'data' => [
+                    'id' => 'report-payment-for-other-001',
+                    'paymentReference' => 'REPORT-PAID-FOR-OTHER-001',
+                    'collectedAmount' => 250,
+                    'collectedCurrency' => 'TZS',
+                ],
+            ],
+        ]);
+        app(PaymentProviderEventProcessor::class)->process($event);
+
+        $beneficiaryMessage = implode("\n", $messages[$beneficiary->id] ?? []);
+        $this->assertStringContainsString('MALIPO YAKO YAMEPOKELEWA', $beneficiaryMessage);
+        $this->assertStringContainsString('Mchezo: Office Report Group', $beneficiaryMessage);
+        $this->assertStringContainsString('Kiasi: TZS 250', $beneficiaryMessage);
+        $this->assertStringContainsString('Umelipiwa na namba: 0713456789', $beneficiaryMessage);
+        $this->assertNotEmpty($messages[$payer->id] ?? []);
+        $this->assertNotEmpty($messages[$coordinator->id] ?? []);
+    }
+
     /** @return array{Group, User, User} */
     private function groupWithCoordinatorAndMember(): array
     {

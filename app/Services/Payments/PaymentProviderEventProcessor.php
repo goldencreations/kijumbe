@@ -8,6 +8,7 @@ use App\Models\Group;
 use App\Models\PaymentAttempt;
 use App\Models\PaymentProviderEvent;
 use App\Models\Payout;
+use App\Models\User;
 use App\Services\ContributionService;
 use App\Services\GroupFinancialReportService;
 use App\Services\MemberPaymentLedgerService;
@@ -124,7 +125,40 @@ class PaymentProviderEventProcessor
                     ]);
                 }
             }
+            $this->notifyBeneficiary($notificationAttempt);
             $this->notifyCoordinators($notificationAttempt);
+        }
+    }
+
+    private function notifyBeneficiary(PaymentAttempt $attempt): void
+    {
+        $beneficiaryId = (int) data_get($attempt->metadata, 'member_id');
+        if ($beneficiaryId <= 0 || $beneficiaryId === (int) $attempt->initiated_by) {
+            return;
+        }
+
+        $beneficiary = User::query()->find($beneficiaryId);
+        $group = Group::query()->find(data_get($attempt->metadata, 'group_id'));
+        if (! $beneficiary || ! $group) {
+            return;
+        }
+
+        $payerPhone = $this->phones->forDisplay($attempt->phone_e164);
+        $message = "MALIPO YAKO YAMEPOKELEWA\n"
+            ."Mchezo: {$group->name}\n"
+            .'Kiasi: TZS '.number_format((int) $attempt->amount)."\n"
+            ."Umelipiwa na namba: {$payerPhone}\n"
+            .'Muda: '.($attempt->completed_at ?: now())->format('d/m/Y H:i')." EAT\n\n"
+            .'Tuma TAARIFA kuona hali ya mchezo wako.';
+
+        try {
+            $this->whatsapp->sendText($beneficiary, $message);
+        } catch (\Throwable $exception) {
+            Log::warning('Payment succeeded but beneficiary WhatsApp notification failed.', [
+                'payment_attempt_id' => $attempt->id,
+                'beneficiary_user_id' => $beneficiary->id,
+                'error' => $exception->getMessage(),
+            ]);
         }
     }
 
