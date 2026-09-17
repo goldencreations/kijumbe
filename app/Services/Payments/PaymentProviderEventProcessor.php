@@ -4,15 +4,18 @@ namespace App\Services\Payments;
 
 use App\Enums\PaymentAttemptStatus;
 use App\Enums\PayoutStatus;
+use App\Models\Group;
 use App\Models\PaymentAttempt;
 use App\Models\PaymentProviderEvent;
 use App\Models\Payout;
 use App\Services\ContributionService;
+use App\Services\GroupFinancialReportService;
 use App\Services\MemberPaymentLedgerService;
 use App\Services\PayoutService;
 use App\Services\Whatsapp\MetaWhatsAppClient;
 use Illuminate\Support\Carbon;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Log;
 use RuntimeException;
 
 class PaymentProviderEventProcessor
@@ -21,6 +24,7 @@ class PaymentProviderEventProcessor
         private readonly ContributionService $contributions,
         private readonly PayoutService $payouts,
         private readonly MemberPaymentLedgerService $memberPayments,
+        private readonly GroupFinancialReportService $financialReports,
         private readonly MetaWhatsAppClient $whatsapp,
     ) {}
 
@@ -108,7 +112,53 @@ class PaymentProviderEventProcessor
         if ($notificationAttempt) {
             $user = $notificationAttempt->initiator;
             if ($user) {
-                $this->whatsapp->sendText($user, "Malipo yako ya TZS {$notificationAttempt->amount} yamefanikiwa na yamegawanywa kwenye madeni yako ya zamani kwanza.");
+                try {
+                    $this->whatsapp->sendText($user, "Malipo yako ya TZS {$notificationAttempt->amount} yamefanikiwa na yamegawanywa kwenye madeni yako ya zamani kwanza.");
+                } catch (\Throwable $exception) {
+                    Log::warning('Payment succeeded but payer WhatsApp notification failed.', [
+                        'payment_attempt_id' => $notificationAttempt->id,
+                        'user_id' => $user->id,
+                        'error' => $exception->getMessage(),
+                    ]);
+                }
+            }
+            $this->notifyCoordinators($notificationAttempt);
+        }
+    }
+
+    private function notifyCoordinators(PaymentAttempt $attempt): void
+    {
+        $group = Group::query()->find(data_get($attempt->metadata, 'group_id'));
+        if (! $group) {
+            return;
+        }
+
+        $allocations = $attempt->allocations()->with('obligation.slot.groupMember.user')->get();
+        $names = $allocations
+            ->map(fn ($allocation) => $allocation->obligation?->slot?->groupMember?->member_name
+                ?: $allocation->obligation?->slot?->groupMember?->user?->name)
+            ->filter()
+            ->unique()
+            ->implode(', ');
+        $payer = $attempt->initiator?->name ?: $attempt->phone_e164;
+        $message = "MALIPO YAMEPOKELEWA\n"
+            ."Mchezo: {$group->name}\n"
+            .'Mwanachama: '.($names !== '' ? $names : 'Mwanachama')."\n"
+            .'Kiasi: TZS '.number_format((int) $attempt->amount)."\n"
+            ."Amelipiwa na: {$payer} ({$attempt->phone_e164})\n"
+            .'Sehemu ya ada ya Kijumbe: TZS '.number_format((int) $allocations->sum('coordinator_fee_amount'))."\n"
+            .'Muda: '.($attempt->completed_at ?: now())->format('d/m/Y H:i')." EAT\n\n"
+            .'Tuma TAARIFA kupata ripoti kamili.';
+
+        foreach ($this->financialReports->coordinators($group) as $coordinator) {
+            try {
+                $this->whatsapp->sendText($coordinator, $message);
+            } catch (\Throwable $exception) {
+                Log::warning('Payment succeeded but coordinator WhatsApp notification failed.', [
+                    'payment_attempt_id' => $attempt->id,
+                    'coordinator_user_id' => $coordinator->id,
+                    'error' => $exception->getMessage(),
+                ]);
             }
         }
     }

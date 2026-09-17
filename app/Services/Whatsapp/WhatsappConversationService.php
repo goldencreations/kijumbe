@@ -9,6 +9,7 @@ use App\Models\Payout;
 use App\Models\User;
 use App\Models\WhatsappFlowSession;
 use App\Services\DailyContributionService;
+use App\Services\GroupFinancialReportService;
 use App\Services\MemberPaymentLedgerService;
 use App\Services\PaymentAttemptService;
 use App\Services\Payments\PayoutSecurityService;
@@ -29,6 +30,7 @@ class WhatsappConversationService
         private readonly GroupMemberFlowService $groupMembers,
         private readonly DailyContributionService $dailyContributions,
         private readonly MemberPaymentLedgerService $memberPaymentLedger,
+        private readonly GroupFinancialReportService $financialReports,
         private readonly PhoneNumber $phones,
         private readonly PayoutSecurityService $payoutSecurity,
     ) {}
@@ -77,6 +79,12 @@ class WhatsappConversationService
 
         if (in_array($command, ['NAMBA YA SIRI', 'NAMBAYA SIRI', 'PIN'], true)) {
             $this->startPinManagement($user);
+
+            return;
+        }
+
+        if (in_array($command, ['TAARIFA', 'RIPOTI', 'REPORT'], true)) {
+            $this->sendCoordinatorFinancialReports($user);
 
             return;
         }
@@ -753,8 +761,45 @@ class WhatsappConversationService
             ."POKEA - Pokea marejesho yako siku yako ikifika\n"
             ."NAMBA YA SIRI - Weka au badili namba ya siri ya kupokea fedha\n"
             ."STATUS - Angalia mchango unaodaiwa\n"
+            ."TAARIFA - Pata ripoti ya malipo ya mchezo unaoratibu\n"
             ."KATISHA - Futa mchakato unaoendelea\n\n"
             .'Kwa kujiunga, kulipa, au kuona taarifa za mchezo, tuma msimbo wa mchezo.';
+    }
+
+    private function sendCoordinatorFinancialReports(User $user): void
+    {
+        $groups = $this->financialReports->coordinatorGroups($user);
+        if ($groups->isEmpty()) {
+            $this->whatsapp->sendText($user, 'Huna mchezo unaouratibu kwa sasa.');
+
+            return;
+        }
+
+        foreach ($groups as $group) {
+            $this->sendLongText($user, $this->financialReports->report($group, true));
+        }
+    }
+
+    private function sendLongText(User $user, string $text): void
+    {
+        $chunks = [];
+        $current = '';
+        foreach (explode("\n", $text) as $line) {
+            $candidate = $current === '' ? $line : $current."\n".$line;
+            if (mb_strlen($candidate) > 3500 && $current !== '') {
+                $chunks[] = $current;
+                $current = $line;
+            } else {
+                $current = $candidate;
+            }
+        }
+        if ($current !== '') {
+            $chunks[] = $current;
+        }
+
+        foreach ($chunks as $chunk) {
+            $this->whatsapp->sendText($user, $chunk);
+        }
     }
 
     private function actionChoice(string $text, string $command): ?string
