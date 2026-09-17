@@ -6,6 +6,7 @@ use App\Contracts\PayoutGateway;
 use App\Models\Payout;
 use Illuminate\Http\Client\PendingRequest;
 use Illuminate\Support\Facades\Http;
+use Illuminate\Support\Facades\Log;
 use RuntimeException;
 
 class EcofyPayoutGateway implements PayoutGateway
@@ -28,11 +29,29 @@ class EcofyPayoutGateway implements PayoutGateway
 
     public function confirm(Payout $payout, string $quoteId): array
     {
-        return $this->client($payout->idempotency_key ?: 'payout-'.$payout->order_reference)
+        $response = $this->client($payout->idempotency_key ?: 'payout-'.$payout->order_reference)
             ->post('/v1/payouts', [
                 'quote' => $quoteId,
                 'reference' => $payout->order_reference,
-            ])->throw()->json();
+            ]);
+
+        if ($response->failed()) {
+            $code = strtolower((string) data_get($response->json(), 'error.code'));
+            Log::warning('Ecofy payout confirmation was rejected.', [
+                'payout_id' => $payout->id,
+                'order_reference' => $payout->order_reference,
+                'http_status' => $response->status(),
+                'provider_code' => $code,
+            ]);
+
+            throw new RuntimeException(match ($code) {
+                'insufficient_balance' => 'Malipo yanasubiri salio la Kijumbe liongezwe kwa mtoa huduma. Tafadhali jaribu POKEA baadaye.',
+                'expired_quote', 'quote_expired' => 'Uthibitisho wa akaunti umeisha muda. Tuma POKEA uanze tena.',
+                default => 'Mtoa huduma hakukubali kutuma fedha kwa sasa. Tuma POKEA ujaribu tena baadaye.',
+            });
+        }
+
+        return $response->json();
     }
 
     private function client(string $idempotencyKey): PendingRequest

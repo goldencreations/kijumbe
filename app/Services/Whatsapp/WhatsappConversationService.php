@@ -18,6 +18,7 @@ use Carbon\Carbon;
 use Illuminate\Support\Collection;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Hash;
+use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Str;
 
 class WhatsappConversationService
@@ -1079,6 +1080,14 @@ class WhatsappConversationService
                 return true;
             }
         } catch (\Throwable $exception) {
+            Log::warning('WhatsApp payout flow could not continue.', [
+                'payout_id' => $payout->id,
+                'user_id' => $user->id,
+                'step' => $session->step_key,
+                'exception' => $exception::class,
+                'error' => $exception->getMessage(),
+            ]);
+
             if (in_array($session->step_key, ['await_payment_phone', 'await_payout_otp', 'await_payout_pin'], true)) {
                 $this->whatsapp->sendText($user, $exception->getMessage());
 
@@ -1086,7 +1095,11 @@ class WhatsappConversationService
             }
 
             $this->flowSessions->complete($session);
-            $this->whatsapp->sendText($user, 'Hatukuweza kuendelea na kupokea fedha. Tuma POKEA ujaribu tena.');
+            $message = $exception instanceof \RuntimeException
+                ? $exception->getMessage()
+                : 'Hatukuweza kuendelea na kupokea fedha. Tuma POKEA ujaribu tena.';
+            $payout->update(['failure_reason' => $message]);
+            $this->whatsapp->sendText($user, $message);
 
             return true;
         }

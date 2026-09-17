@@ -9,6 +9,7 @@ use App\Models\PayoutVerification;
 use App\Models\User;
 use App\Services\PayoutService;
 use App\Services\PhoneNumber;
+use Illuminate\Support\Carbon;
 use Illuminate\Support\Facades\Hash;
 use RuntimeException;
 
@@ -120,7 +121,7 @@ class PayoutSecurityService
             'payment_quote_name' => (string) ($quote['account_name'] ?? ''),
             'payment_quote_fee' => (int) ($quote['fee'] ?? 0),
             'payment_quote_total' => (int) ($quote['total'] ?? $verification->payout->amount),
-            'payment_quote_expires_at' => $quote['expires_at'] ?? null,
+            'payment_quote_expires_at' => $this->providerDateTime($quote['expires_at'] ?? null),
             'status' => 'quote_ready',
         ]);
 
@@ -185,5 +186,14 @@ class PayoutSecurityService
         if (! preg_match('/^\d{4,6}$/', $pin)) {
             throw new RuntimeException('Namba ya siri lazima iwe tarakimu 4 hadi 6.');
         }
+    }
+
+    private function providerDateTime(mixed $value): ?Carbon
+    {
+        if (! filled($value)) {
+            return null;
+        }
+
+        return Carbon::parse((string) $value)->setTimezone((string) config('app.timezone'));
     }
 }

@@ -16,17 +16,20 @@ use App\Models\Group;
 use App\Models\GroupMember;
 use App\Models\PaymentAttempt;
 use App\Models\Payout;
+use App\Models\PayoutVerification;
 use App\Models\Round;
 use App\Models\User;
 use App\Models\WhatsappFlowSession;
 use App\Models\WhatsappMessage;
 use App\Models\WhatsappWebhookEvent;
+use App\Services\Payments\PayoutSecurityService;
 use App\Services\Whatsapp\MetaWhatsAppClient;
 use App\Services\Whatsapp\WhatsappConversationService;
 use App\Services\Whatsapp\WhatsappFlowSessionService;
 use App\Services\Whatsapp\WhatsappWebhookEventProcessor;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Carbon;
+use Illuminate\Support\Facades\Hash;
 use Illuminate\Support\Facades\Http;
 use Laravel\Sanctum\Sanctum;
 use Mockery;
@@ -613,6 +616,94 @@ class LiveIntegrationsTest extends TestCase
         $this->expectExceptionMessage('Malipo yanasubiri salio la Kijumbe liongezwe kwa mtoa huduma. Tafadhali jaribu POKEA baadaye.');
 
         app(PayoutGateway::class)->quote($payout);
+    }
+
+    public function test_utc_payout_quote_expiry_is_saved_as_the_correct_eat_instant(): void
+    {
+        Carbon::setTestNow(Carbon::parse('2026-09-17 22:00:00', 'Africa/Dar_es_Salaam'));
+        $gateway = new class implements PayoutGateway
+        {
+            public function quote(Payout $payout): array
+            {
+                return [
+                    'id' => 'quote-utc-001',
+                    'account_name' => 'TEST RECIPIENT',
+                    'fee' => 20,
+                    'total' => 820,
+                    'expires_at' => '2026-09-17T19:10:00Z',
+                ];
+            }
+
+            public function confirm(Payout $payout, string $quoteId): array
+            {
+                return ['id' => 'payout-processing-001', 'status' => 'processing'];
+            }
+        };
+        $this->app->instance(PayoutGateway::class, $gateway);
+
+        [, , $round] = $this->readyContribution(withReadyRound: true);
+        $recipient = $round->recipient->groupMember->user;
+        $payout = Payout::create([
+            'round_id' => $round->id,
+            'recipient_cycle_member_id' => $round->recipient_cycle_member_id,
+            'amount' => 800,
+            'status' => PayoutStatus::Pending,
+            'destination_phone' => $recipient->phone,
+            'provider' => 'ecofy',
+            'order_reference' => 'KJP-UTC-QUOTE-001',
+            'idempotency_key' => 'payout-utc-quote-001',
+        ]);
+        $verification = PayoutVerification::create([
+            'payout_id' => $payout->id,
+            'recipient_user_id' => $recipient->id,
+            'payment_phone' => $recipient->phone,
+            'otp_hash' => Hash::make('123456'),
+            'otp_expires_at' => now()->addMinutes(5),
+            'otp_attempts' => 0,
+            'otp_verified_at' => now(),
+            'pin_verified_at' => now(),
+            'status' => 'verified',
+            'expires_at' => now()->addMinutes(15),
+        ]);
+
+        $security = app(PayoutSecurityService::class);
+        $security->createQuote($verification);
+        $verification->refresh();
+
+        $this->assertSame('2026-09-17 22:10:00', $verification->payment_quote_expires_at->format('Y-m-d H:i:s'));
+        $response = $security->confirmPayout($verification);
+        $this->assertSame('processing', $response['status']);
+        $this->assertSame(PayoutStatus::Processing, $payout->fresh()->status);
+    }
+
+    public function test_ecofy_payout_confirmation_explains_insufficient_balance_safely(): void
+    {
+        config([
+            'services.payments.live_enabled' => true,
+            'services.ecofy.base_url' => 'https://ecofy.test',
+            'services.ecofy.api_key' => 'test-key',
+            'services.ecofy.merchant_id' => 'test-merchant',
+        ]);
+        Http::fake([
+            'https://ecofy.test/v1/payouts' => Http::response([
+                'error' => [
+                    'code' => 'insufficient_balance',
+                    'message' => 'payout: insufficient available balance',
+                ],
+            ], 422),
+        ]);
+
+        $payout = new Payout([
+            'amount' => 800,
+            'destination_phone' => '255744330332',
+            'order_reference' => 'KJP-WD-CONFIRM-001',
+            'idempotency_key' => 'confirm-balance-001',
+        ]);
+
+        $this->expectException(\RuntimeException::class);
+        $this->expectExceptionMessage('Malipo yanasubiri salio la Kijumbe liongezwe kwa mtoa huduma. Tafadhali jaribu POKEA baadaye.');
+
+        app(PayoutGateway::class)->confirm($payout, 'quote-001');
     }
 
     /** @return array{User, Contribution, Round|null} */
