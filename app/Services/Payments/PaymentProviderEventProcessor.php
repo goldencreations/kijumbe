@@ -12,6 +12,7 @@ use App\Services\ContributionService;
 use App\Services\GroupFinancialReportService;
 use App\Services\MemberPaymentLedgerService;
 use App\Services\PayoutService;
+use App\Services\PhoneNumber;
 use App\Services\Whatsapp\MetaWhatsAppClient;
 use Illuminate\Support\Carbon;
 use Illuminate\Support\Facades\DB;
@@ -25,6 +26,7 @@ class PaymentProviderEventProcessor
         private readonly PayoutService $payouts,
         private readonly MemberPaymentLedgerService $memberPayments,
         private readonly GroupFinancialReportService $financialReports,
+        private readonly PhoneNumber $phones,
         private readonly MetaWhatsAppClient $whatsapp,
     ) {}
 
@@ -140,12 +142,12 @@ class PaymentProviderEventProcessor
             ->filter()
             ->unique()
             ->implode(', ');
-        $payer = $attempt->initiator?->name ?: $attempt->phone_e164;
+        $payer = $attempt->initiator?->name ?: $this->phones->forDisplay($attempt->phone_e164);
         $message = "MALIPO YAMEPOKELEWA\n"
             ."Mchezo: {$group->name}\n"
             .'Mwanachama: '.($names !== '' ? $names : 'Mwanachama')."\n"
             .'Kiasi: TZS '.number_format((int) $attempt->amount)."\n"
-            ."Amelipiwa na: {$payer} ({$attempt->phone_e164})\n"
+            ."Amelipiwa na: {$payer} ({$this->phones->forDisplay($attempt->phone_e164)})\n"
             .'Sehemu ya ada ya Kijumbe: TZS '.number_format((int) $allocations->sum('coordinator_fee_amount'))."\n"
             .'Muda: '.($attempt->completed_at ?: now())->format('d/m/Y H:i')." EAT\n\n"
             .'Tuma TAARIFA kupata ripoti kamili.';

@@ -11,6 +11,7 @@ use App\Models\Group;
 use App\Models\GroupMember;
 use App\Services\AuditService;
 use App\Services\GroupAccess;
+use App\Services\PhoneNumber;
 use Carbon\Carbon;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
@@ -21,6 +22,7 @@ class GroupController extends Controller
     public function __construct(
         private readonly GroupAccess $access,
         private readonly AuditService $audit,
+        private readonly PhoneNumber $phones,
     ) {}
 
     public function index(Request $request): JsonResponse
@@ -40,7 +42,7 @@ class GroupController extends Controller
     {
         $group = DB::transaction(function () use ($request) {
             $validated = $request->validated();
-            $creatorPhone = preg_replace('/\D+/', '', (string) ($request->user()->whatsapp_wa_id ?: $request->user()->phone));
+            $creatorPhone = $this->phones->toTanzanianWaId($request->user()->whatsapp_wa_id ?: $request->user()->phone);
             $group = Group::create([
                 ...$validated,
                 'group_type' => Group::normalizeGroupType($validated['group_type'] ?? null),

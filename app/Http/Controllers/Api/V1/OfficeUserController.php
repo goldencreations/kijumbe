@@ -6,6 +6,7 @@ use App\Enums\SystemRole;
 use App\Http\Controllers\Controller;
 use App\Http\Requests\StoreOfficeUserRequest;
 use App\Models\User;
+use App\Services\PhoneNumber;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 
@@ -18,10 +19,14 @@ class OfficeUserController extends Controller
         return response()->json(['data' => User::query()->orderBy('name')->get()]);
     }
 
-    public function store(StoreOfficeUserRequest $request): JsonResponse
+    public function store(StoreOfficeUserRequest $request, PhoneNumber $phones): JsonResponse
     {
+        $validated = $request->validated();
+        $validated['phone'] = filled($validated['phone'] ?? null)
+            ? $phones->toTanzanianWaId($validated['phone'])
+            : null;
         $user = User::create([
-            ...$request->validated(),
+            ...$validated,
             'system_role' => $request->enum('system_role', SystemRole::class) ?? SystemRole::Member,
             'is_active' => true,
         ]);

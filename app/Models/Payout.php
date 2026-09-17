@@ -3,6 +3,7 @@
 namespace App\Models;
 
 use App\Enums\PayoutStatus;
+use App\Services\PhoneNumber;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
@@ -11,6 +12,13 @@ use Illuminate\Database\Eloquent\Relations\HasOne;
 class Payout extends Model
 {
     use HasFactory;
+
+    protected $appends = ['destination_phone_local'];
+
+    public function getDestinationPhoneLocalAttribute(): ?string
+    {
+        return app(PhoneNumber::class)->forDisplay($this->destination_phone);
+    }
 
     protected $fillable = [
         'round_id', 'recipient_cycle_member_id', 'amount', 'status',

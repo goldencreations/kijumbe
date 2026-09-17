@@ -3,6 +3,7 @@
 namespace App\Models;
 
 use App\Enums\SystemRole;
+use App\Services\PhoneNumber;
 use Database\Factories\UserFactory;
 use Illuminate\Database\Eloquent\Attributes\Fillable;
 use Illuminate\Database\Eloquent\Attributes\Hidden;
@@ -21,6 +22,18 @@ class User extends Authenticatable
 {
     /** @use HasFactory<UserFactory> */
     use HasApiTokens, HasFactory, Notifiable;
+
+    protected $appends = ['phone_local', 'whatsapp_phone_local'];
+
+    public function getPhoneLocalAttribute(): ?string
+    {
+        return app(PhoneNumber::class)->forDisplay($this->phone);
+    }
+
+    public function getWhatsappPhoneLocalAttribute(): ?string
+    {
+        return app(PhoneNumber::class)->forDisplay($this->whatsapp_wa_id ?: $this->phone);
+    }
 
     public function groupMemberships(): HasMany
     {

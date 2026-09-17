@@ -12,6 +12,8 @@ class PhoneNumber
 
         if (str_starts_with($digits, '0')) {
             $digits = '255'.substr($digits, 1);
+        } elseif (preg_match('/^[67]\d{8}$/', $digits)) {
+            $digits = '255'.$digits;
         }
 
         if (! preg_match('/^255\d{9}$/', $digits)) {
@@ -19,5 +21,23 @@ class PhoneNumber
         }
 
         return $digits;
+    }
+
+    public function toTanzanianLocal(?string $phone): string
+    {
+        return '0'.substr($this->toTanzanianWaId($phone), 3);
+    }
+
+    public function forDisplay(?string $phone): ?string
+    {
+        if (! filled($phone)) {
+            return null;
+        }
+
+        try {
+            return $this->toTanzanianLocal($phone);
+        } catch (InvalidArgumentException) {
+            return (string) $phone;
+        }
     }
 }

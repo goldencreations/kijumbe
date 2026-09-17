@@ -292,7 +292,7 @@ class WhatsappConversationService
 
     private function sendGroupCreationSummary(User $user, array $payload): void
     {
-        $phone = preg_replace('/\D+/', '', (string) ($user->whatsapp_wa_id ?: $user->phone));
+        $phone = $this->phones->toTanzanianLocal($user->whatsapp_wa_id ?: $user->phone);
         $summary = "Tafadhali hakiki taarifa za kikundi:\n";
         $summary .= '1. Jina: '.($payload['group_name'] ?? '-')."\n";
         $summary .= '2. Washiriki: '.($payload['member_slots'] ?? '-')."\n";
@@ -681,7 +681,7 @@ class WhatsappConversationService
 
             $payload['group_id'] = $group->id;
             $this->flowSessions->advance($session, 'await_payment_phone', $payload);
-            $this->whatsapp->sendText($user, 'Tuma namba ya simu ya kulipia, mfano 255712345678.');
+            $this->whatsapp->sendText($user, 'Tuma namba ya simu ya kulipia, mfano 0748281701.');
 
             return true;
         }
@@ -968,7 +968,7 @@ class WhatsappConversationService
         }
 
         $this->flowSessions->startPayout($user, ['payout_id' => $payout->id]);
-        $this->whatsapp->sendText($user, 'Tuma namba ya simu utakayotumia kupokea TZS '.number_format((int) $payout->amount).'. Mfano 255712345678. Tuma KATISHA ukitaka kuacha.');
+        $this->whatsapp->sendText($user, 'Tuma namba ya simu utakayotumia kupokea TZS '.number_format((int) $payout->amount).'. Mfano 0748281701. Tuma KATISHA ukitaka kuacha.');
     }
 
     /** @param array<string, mixed> $message */
@@ -1212,7 +1212,7 @@ class WhatsappConversationService
                 $this->sendPaymentGroups($user, $user);
             } elseif ($text === '2' || in_array(strtoupper($text), ['MTU MWINGINE', 'MWINGINE'], true)) {
                 $this->flowSessions->advance($session, 'await_recipient_phone', $payload);
-                $this->whatsapp->sendText($user, 'Tuma namba ya WhatsApp ya mtu unayemlipia, aliyotumia kujiunga na mchezo. Mfano: 255712345678.');
+                $this->whatsapp->sendText($user, 'Tuma namba ya WhatsApp ya mtu unayemlipia, aliyotumia kujiunga na mchezo. Mfano: 0748281701.');
             } else {
                 $this->whatsapp->sendText($user, 'Jibu 1 kulipia mwenyewe au 2 kulipia mtu mwingine.');
             }
@@ -1224,7 +1224,7 @@ class WhatsappConversationService
             try {
                 $recipientWaId = $this->phones->toTanzanianWaId($text);
             } catch (\Throwable) {
-                $this->whatsapp->sendText($user, 'Tuma namba sahihi ya Tanzania, mfano 255712345678.');
+                $this->whatsapp->sendText($user, 'Tuma namba sahihi ya Tanzania, mfano 0748281701.');
 
                 return true;
             }
@@ -1310,7 +1310,7 @@ class WhatsappConversationService
 
             $payload['amount'] = (int) $text;
             $this->flowSessions->advance($session, 'await_payment_phone', $payload);
-            $this->whatsapp->sendText($user, 'Tuma namba ya simu utakayotumia kulipia, mfano 255712345678.');
+            $this->whatsapp->sendText($user, 'Tuma namba ya simu utakayotumia kulipia, mfano 0748281701.');
 
             return true;
         }

@@ -2,6 +2,7 @@
 
 namespace App\Models;
 
+use App\Services\PhoneNumber;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
@@ -9,6 +10,13 @@ use Illuminate\Database\Eloquent\Relations\BelongsTo;
 class PayoutVerification extends Model
 {
     use HasFactory;
+
+    protected $appends = ['payment_phone_local'];
+
+    public function getPaymentPhoneLocalAttribute(): ?string
+    {
+        return app(PhoneNumber::class)->forDisplay($this->payment_phone);
+    }
 
     protected $fillable = [
         'payout_id', 'recipient_user_id', 'payment_phone', 'otp_hash', 'otp_expires_at',

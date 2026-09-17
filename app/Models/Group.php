@@ -3,6 +3,7 @@
 namespace App\Models;
 
 use App\Enums\GroupStatus;
+use App\Services\PhoneNumber;
 use Illuminate\Database\Eloquent\Concerns\HasUuids;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
@@ -20,6 +21,18 @@ class Group extends Model
     public $incrementing = false;
 
     protected $keyType = 'string';
+
+    protected $appends = ['created_by_phone_local', 'leader_phone_local'];
+
+    public function getCreatedByPhoneLocalAttribute(): ?string
+    {
+        return app(PhoneNumber::class)->forDisplay($this->created_by_phone);
+    }
+
+    public function getLeaderPhoneLocalAttribute(): ?string
+    {
+        return app(PhoneNumber::class)->forDisplay($this->leader_phone);
+    }
 
     protected $fillable = [
         'name',

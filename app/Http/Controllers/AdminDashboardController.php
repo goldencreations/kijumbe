@@ -12,10 +12,12 @@ use App\Models\Payout;
 use App\Models\Round;
 use App\Models\User;
 use App\Models\WhatsappMessage;
+use App\Services\PhoneNumber;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Schema;
 use Illuminate\View\View;
+use InvalidArgumentException;
 
 class AdminDashboardController extends Controller
 {
@@ -59,7 +61,7 @@ class AdminDashboardController extends Controller
             'groups' => [Group::class, ['creator'], ['name', 'id', 'created_by_phone'], ['draft', 'active', 'archived']],
             'members' => [User::class, ['groupMemberships.group'], ['name', 'email', 'phone'], []],
             'payments' => [PaymentAttempt::class, ['initiator', 'contribution.round.cycle.group', 'contribution.cycleMember.groupMember.user', 'allocations.obligation.group', 'allocations.obligation.slot.groupMember.user'], ['order_reference', 'provider_reference', 'phone_e164'], array_map(fn (PaymentAttemptStatus $status): string => $status->value, PaymentAttemptStatus::cases())],
-            'payouts' => [Payout::class, ['recipient.groupMember.user', 'round.cycle.group', 'requester', 'approver'], ['order_reference', 'payment_reference'], ['pending', 'approved', 'processing', 'paid', 'failed', 'refunded', 'reversed']],
+            'payouts' => [Payout::class, ['recipient.groupMember.user', 'round.cycle.group', 'requester', 'approver'], ['order_reference', 'payment_reference', 'destination_phone'], ['pending', 'approved', 'processing', 'paid', 'failed', 'refunded', 'reversed']],
             'whatsapp' => [WhatsappMessage::class, ['user'], ['wa_id', 'template_name', 'meta_message_id'], ['queued', 'sent', 'delivered', 'read', 'failed', 'received']],
             'audit' => [AuditLog::class, ['actor'], ['action', 'auditable_id'], []],
             'exceptions' => [Round::class, ['cycle.group', 'recipient.groupMember.user'], [], ['in_grace', 'blocked']],
@@ -68,6 +70,14 @@ class AdminDashboardController extends Controller
         [$model, $relations, $fields, $statuses] = $definitions[$section];
         $query = $model::with($relations);
         $search = mb_substr(trim((string) $request->input('q', '')), 0, 120);
+        $phoneSearch = null;
+        if ($search !== '') {
+            try {
+                $phoneSearch = app(PhoneNumber::class)->toTanzanianWaId($search);
+            } catch (InvalidArgumentException) {
+                // The search term is not a phone number.
+            }
+        }
         if ($section === 'groups') {
             $query->withCount(['memberships' => fn ($q) => $q->where('is_active', true)]);
 
@@ -97,14 +107,18 @@ class AdminDashboardController extends Controller
             }
         }
         if ($search !== '') {
-            $query->where(function ($q) use ($fields, $search, $section) {
+            $query->where(function ($q) use ($fields, $search, $phoneSearch, $section) {
                 foreach ($fields as $field) {
                     $q->orWhere($field, 'like', '%'.$search.'%');
+                    if ($phoneSearch !== null && $phoneSearch !== $search) {
+                        $q->orWhere($field, 'like', '%'.$phoneSearch.'%');
+                    }
                 }
                 if ($section === 'payments') {
-                    $q->orWhereHas('contribution.cycleMember.groupMember.user', fn ($u) => $u->where('name', 'like', '%'.$search.'%')->orWhere('phone', 'like', '%'.$search.'%'))
+                    $relatedPhone = $phoneSearch ?? $search;
+                    $q->orWhereHas('contribution.cycleMember.groupMember.user', fn ($u) => $u->where('name', 'like', '%'.$search.'%')->orWhere('phone', 'like', '%'.$relatedPhone.'%'))
                         ->orWhereHas('contribution.round.cycle.group', fn ($g) => $g->where('name', 'like', '%'.$search.'%')->orWhere('group_code', 'like', '%'.$search.'%'))
-                        ->orWhereHas('allocations.obligation.slot.groupMember.user', fn ($u) => $u->where('name', 'like', '%'.$search.'%')->orWhere('phone', 'like', '%'.$search.'%'))
+                        ->orWhereHas('allocations.obligation.slot.groupMember.user', fn ($u) => $u->where('name', 'like', '%'.$search.'%')->orWhere('phone', 'like', '%'.$relatedPhone.'%'))
                         ->orWhereHas('allocations.obligation.group', fn ($g) => $g->where('name', 'like', '%'.$search.'%')->orWhere('group_code', 'like', '%'.$search.'%'));
                 }
                 if ($section === 'payouts') {

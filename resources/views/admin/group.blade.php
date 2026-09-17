@@ -17,7 +17,7 @@
             @php($paidAmount = (int) $payment['paid_amount'])
             @php($expectedAmount = (int) $payment['expected_amount'])
             @php($slotsCount = (int) $payment['slots_count'])
-            <tr><td><strong>{{ $membership->user->name }}</strong><small>{{ $membership->user->email }}</small></td><td>{{ $membership->user->phone ?: 'Not configured' }}</td><td class="numeric"><strong>{{ $group->currency ?: 'TZS' }} {{ number_format($paidAmount) }}</strong><small>{{ $expectedAmount > 0 ? 'of '.($group->currency ?: 'TZS').' '.number_format($expectedAmount) : 'No payment due' }}@if($slotsCount > 0) &middot; {{ $slotsCount }} {{ $slotsCount === 1 ? 'slot' : 'slots' }}@endif</small></td><td>{{ ucfirst($membership->role->value) }}</td><td><x-status :value="$membership->is_active ? 'active' : 'inactive'"/></td><td>{{ $membership->joined_at->format('d M Y') }}</td></tr>
+            <tr><td><strong>{{ $membership->user->name }}</strong><small>{{ $membership->user->email }}</small></td><td>{{ $membership->user->phone_local ?: 'Not configured' }}</td><td class="numeric"><strong>{{ $group->currency ?: 'TZS' }} {{ number_format($paidAmount) }}</strong><small>{{ $expectedAmount > 0 ? 'of '.($group->currency ?: 'TZS').' '.number_format($expectedAmount) : 'No payment due' }}@if($slotsCount > 0) &middot; {{ $slotsCount }} {{ $slotsCount === 1 ? 'slot' : 'slots' }}@endif</small></td><td>{{ ucfirst($membership->role->value) }}</td><td><x-status :value="$membership->is_active ? 'active' : 'inactive'"/></td><td>{{ $membership->joined_at->format('d M Y') }}</td></tr>
         @endforeach
     </tbody></table></div>
 </section>

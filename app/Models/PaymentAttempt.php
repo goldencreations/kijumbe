@@ -3,13 +3,22 @@
 namespace App\Models;
 
 use App\Enums\PaymentAttemptStatus;
+use App\Services\PhoneNumber;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
+use Illuminate\Database\Eloquent\Relations\HasMany;
 
 class PaymentAttempt extends Model
 {
     use HasFactory;
+
+    protected $appends = ['phone_local'];
+
+    public function getPhoneLocalAttribute(): ?string
+    {
+        return app(PhoneNumber::class)->forDisplay($this->phone_e164);
+    }
 
     protected $fillable = [
         'contribution_id', 'initiated_by', 'provider', 'method', 'order_reference', 'idempotency_key',
@@ -42,7 +51,7 @@ class PaymentAttempt extends Model
         return $this->belongsTo(Contribution::class);
     }
 
-    public function allocations(): \Illuminate\Database\Eloquent\Relations\HasMany
+    public function allocations(): HasMany
     {
         return $this->hasMany(PaymentAllocation::class);
     }

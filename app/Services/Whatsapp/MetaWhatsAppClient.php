@@ -4,12 +4,15 @@ namespace App\Services\Whatsapp;
 
 use App\Models\User;
 use App\Models\WhatsappMessage;
+use App\Services\PhoneNumber;
 use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Str;
 use RuntimeException;
 
 class MetaWhatsAppClient
 {
+    public function __construct(private readonly PhoneNumber $phones) {}
+
     public function sendText(User $user, string $text): WhatsappMessage
     {
         return $this->send($user, 'text', [
@@ -34,7 +37,6 @@ class MetaWhatsAppClient
 
     /**
      * Send a WhatsApp template that launches a Flow.
-     *
      */
     public function sendFlowTemplate(
         User $user,
@@ -63,11 +65,11 @@ class MetaWhatsAppClient
             throw new RuntimeException('This office member is not opted in for WhatsApp messages.');
         }
 
-        $waId = (string) ($user->whatsapp_wa_id ?: $user->phone);
+        $waId = $this->phones->toTanzanianWaId($user->whatsapp_wa_id ?: $user->phone);
         $payload = [
             'messaging_product' => 'whatsapp',
             'recipient_type' => 'individual',
-            'to' => preg_replace('/\D+/', '', $waId),
+            'to' => $waId,
             ...$content,
         ];
 

@@ -7,11 +7,13 @@ use App\Models\Group;
 use App\Models\GroupMember;
 use App\Models\GroupMemberSlot;
 use App\Models\User;
+use App\Services\PhoneNumber;
 use Illuminate\Support\Facades\DB;
-use Illuminate\Support\Str;
 
 class GroupMemberFlowService
 {
+    public function __construct(private readonly PhoneNumber $phones) {}
+
     public function resolveGroup(string $code): ?Group
     {
         $code = trim($code);
@@ -218,7 +220,7 @@ class GroupMemberFlowService
         $lines = [
             "Ripoti ya mwisho ya {$group->name}",
             "Kiasi kwa jina: {$group->currency} ".number_format($amount)." kila baada ya siku {$interval}.",
-            "Mwanachama anayefuata kupokea fedha atapokea baada ya siku ".((int) ($group->payout_interval_days ?: $interval)).'.',
+            'Mwanachama anayefuata kupokea fedha atapokea baada ya siku '.((int) ($group->payout_interval_days ?: $interval)).'.',
             'Mpangilio wa kupokea:',
         ];
 
@@ -254,12 +256,12 @@ class GroupMemberFlowService
         $lines = [
             "Kikundi: {$group->name}",
             "Namba ya kikundi: {$code}",
-            "Lugha: ".($this->languageName((string) ($group->language ?: 'sw'))),
-            "Aina: ".($this->groupTypeName((string) ($group->group_type ?: 'money'))),
+            'Lugha: '.($this->languageName((string) ($group->language ?: 'sw'))),
+            'Aina: '.($this->groupTypeName((string) ($group->group_type ?: 'money'))),
             "Kiasi kwa jina: {$group->currency} ".number_format((int) ($group->contribution_amount ?? $group->amount_per_day ?? 0)),
-            "Mchango kila baada ya siku: ".((int) ($group->contribution_interval_days ?: $group->period_days ?: 1)),
-            "Mpokeaji wa fedha kila baada ya siku: ".((int) ($group->payout_interval_days ?: $group->period_days ?: 1)),
-            "Idadi ya wanachama: ".((int) ($group->member_slots ?? 0)),
+            'Mchango kila baada ya siku: '.((int) ($group->contribution_interval_days ?: $group->period_days ?: 1)),
+            'Mpokeaji wa fedha kila baada ya siku: '.((int) ($group->payout_interval_days ?: $group->period_days ?: 1)),
+            'Idadi ya wanachama: '.((int) ($group->member_slots ?? 0)),
         ];
 
         if ($remaining !== null) {
@@ -270,17 +272,17 @@ class GroupMemberFlowService
             $lines[] = 'Kuanza: '.$group->cycle_starts_at->timezone('Africa/Dar_es_Salaam')->format('d M Y H:i');
         }
 
-        $lines[] = "Mpangilio wa kupokea: ".($this->payoutOrderName((string) ($group->payout_order ?: 'fixed')));
-        $lines[] = "Ada ya Kijumbe: TZS ".number_format((int) ($group->kijumbe_fee ?: $group->platform_fee_amount ?? 0));
-        $lines[] = "Faini: TZS ".number_format((int) ($group->penalty_amount ?? 0));
-        $lines[] = "Muda wa kuanza faini: masaa ".((int) ($group->penalty_timing_hours ?: $group->grace_period_hours ?? 0));
+        $lines[] = 'Mpangilio wa kupokea: '.($this->payoutOrderName((string) ($group->payout_order ?: 'fixed')));
+        $lines[] = 'Ada ya Kijumbe: TZS '.number_format((int) ($group->kijumbe_fee ?: $group->platform_fee_amount ?? 0));
+        $lines[] = 'Faini: TZS '.number_format((int) ($group->penalty_amount ?? 0));
+        $lines[] = 'Muda wa kuanza faini: masaa '.((int) ($group->penalty_timing_hours ?: $group->grace_period_hours ?? 0));
 
         return implode("\n", $lines);
     }
 
     private function phone(User $user): string
     {
-        return preg_replace('/\D+/', '', (string) ($user->whatsapp_wa_id ?: $user->phone));
+        return $this->phones->toTanzanianWaId($user->whatsapp_wa_id ?: $user->phone);
     }
 
     private function languageName(string $language): string

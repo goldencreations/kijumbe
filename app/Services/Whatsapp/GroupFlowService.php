@@ -8,6 +8,7 @@ use App\Models\Group;
 use App\Models\GroupMember;
 use App\Models\GroupMemberSlot;
 use App\Models\User;
+use App\Services\PhoneNumber;
 use Carbon\Carbon;
 use Illuminate\Support\Arr;
 use Illuminate\Support\Facades\DB;
@@ -15,6 +16,8 @@ use Illuminate\Support\Str;
 
 class GroupFlowService
 {
+    public function __construct(private readonly PhoneNumber $phones) {}
+
     /**
      * Create a draft group from a WhatsApp chat or legacy Flow submission.
      *
@@ -61,7 +64,7 @@ class GroupFlowService
         $resolutionThreshold = $this->intOrNull($response, ['resolution_threshold_percent', 'kiwango_cha_uamuzi', 'threshold']);
         $cycleStartsAt = $this->parseDate($response, ['cycle_starts_at', 'tarehe_ya_kuanza', 'starts_at']);
         $payoutOrder = $this->cleanText(Arr::get($response, 'payout_order', Arr::get($response, 'mpangilio_wa_malipo', '')));
-        $createdByPhone = preg_replace('/\D+/', '', (string) ($user->whatsapp_wa_id ?: $user->phone));
+        $createdByPhone = $this->phones->toTanzanianWaId($user->whatsapp_wa_id ?: $user->phone);
 
         if ($name === '') {
             $name = 'Kikundi kipya';
