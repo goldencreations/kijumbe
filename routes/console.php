@@ -25,5 +25,7 @@ Schedule::command('kijumbe:notify-due-payouts')
     ->withoutOverlapping();
 
 Schedule::command('kijumbe:notify-contribution-reminders')
-    ->everyMinute()
+    ->everyFifteenMinutes()
+    ->timezone('Africa/Dar_es_Salaam')
+    ->between('08:00', '23:59')
     ->withoutOverlapping();

@@ -70,6 +70,72 @@ class MichezoPayoutSyncServiceTest extends TestCase
         Carbon::setTestNow();
     }
 
+    public function test_opted_in_member_is_reminded_before_todays_deadline_only_once(): void
+    {
+        Carbon::setTestNow(Carbon::parse('2026-09-17 17:00:00', 'Africa/Dar_es_Salaam'));
+        $user = User::factory()->create([
+            'phone' => '255700000001',
+            'whatsapp_wa_id' => '255700000001',
+            'whatsapp_opted_in_at' => now(),
+        ]);
+        $group = Group::create([
+            'name' => 'Reminder test',
+            'status' => GroupStatus::Active,
+            'created_by' => $user->id,
+            'contribution_amount' => 200,
+            'currency' => 'TZS',
+            'contribution_interval_days' => 1,
+            'cycle_starts_at' => '2026-09-16 16:10:00',
+            'kijumbe_fee' => 50,
+        ]);
+        $membership = GroupMember::create([
+            'group_id' => $group->id,
+            'user_id' => $user->id,
+            'member_name' => $user->name,
+            'majina_count' => 1,
+            'role' => GroupRole::Member,
+            'is_active' => true,
+            'joined_at' => now(),
+        ]);
+        $slot = GroupMemberSlot::create([
+            'group_id' => $group->id,
+            'group_member_id' => $membership->id,
+            'slot_number' => 1,
+            'payout_position' => 1,
+            'status' => 'active',
+        ]);
+
+        $ledger = app(MemberPaymentLedgerService::class);
+        $ledger->materialize($group->fresh());
+        $slot->obligations()->update([
+            'paid_amount' => 250,
+            'status' => 'paid',
+            'paid_at' => now(),
+        ]);
+
+        Carbon::setTestNow(Carbon::parse('2026-09-18 09:00:00', 'Africa/Dar_es_Salaam'));
+        $message = '';
+        $whatsapp = Mockery::mock(MetaWhatsAppClient::class);
+        $whatsapp->shouldReceive('sendText')->once()->andReturnUsing(function (User $recipient, string $text) use ($user, &$message): WhatsappMessage {
+            $this->assertTrue($recipient->is($user));
+            $message = $text;
+
+            return new WhatsappMessage;
+        });
+        $this->app->instance(MetaWhatsAppClient::class, $whatsapp);
+
+        $this->assertSame(0, Artisan::call('kijumbe:notify-contribution-reminders'));
+        $this->assertStringContainsString('Sent 1 contribution reminder(s).', Artisan::output());
+        $this->assertStringContainsString('Mzunguko wa zamani zaidi ni 3', $message);
+        $this->assertStringContainsString('TZS 250', $message);
+        $this->assertStringContainsString('kabla ya 16:10 EAT', $message);
+        $this->assertSame(3, $slot->obligations()->count());
+
+        $this->assertSame(0, Artisan::call('kijumbe:notify-contribution-reminders'));
+        $this->assertStringContainsString('Sent 0 contribution reminder(s).', Artisan::output());
+        Carbon::setTestNow();
+    }
+
     public function test_kijumbe_fee_is_split_30_percent_to_platform_and_70_percent_to_coordinator(): void
     {
         Carbon::setTestNow(Carbon::parse('2026-09-17 09:00:00', 'Africa/Dar_es_Salaam'));

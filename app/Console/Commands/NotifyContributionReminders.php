@@ -30,12 +30,15 @@ class NotifyContributionReminders extends Command
                 foreach ($groups as $group) {
                     foreach ($group->memberships as $membership) {
                         $user = $membership->user;
-                        if (! $user || ! $user->is_active) {
+                        if (! $user || ! $user->is_active
+                            || ! $user->whatsapp_wa_id
+                            || ! $user->whatsapp_opted_in_at
+                            || $user->whatsapp_opted_out_at) {
                             continue;
                         }
 
                         $obligations = $ledger->outstandingForUser($user, $group)
-                            ->filter(fn ($obligation): bool => $obligation->due_at?->lte(now()));
+                            ->filter(fn ($obligation): bool => $obligation->due_at?->lte(now()->endOfDay()));
                         if ($obligations->isEmpty()) {
                             continue;
                         }
@@ -54,8 +57,14 @@ class NotifyContributionReminders extends Command
                             0,
                         ));
                         $groupName = $group->name ?: 'mchezo wako';
+                        $dueToday = $obligations
+                            ->filter(fn ($obligation): bool => $obligation->due_at?->isSameDay(now()))
+                            ->sortBy('due_at')
+                            ->first();
+                        $deadline = $dueToday?->due_at?->timezone('Africa/Dar_es_Salaam')->format('H:i');
                         $message = "Ukumbusho wa mchango wa {$groupName}.\n"
                             ."Mzunguko wa zamani zaidi ni {$oldestRound} na unadaiwa TZS ".number_format($total).".\n"
+                            .($deadline ? "Mchango wa leo unatakiwa kabla ya {$deadline} EAT.\n" : '')
                             .'Tuma LIPA, chagua mchezo huu, thibitisha kiasi, kisha tuma namba ya simu ya kulipia. '
                             ."Mchango wako ukichelewa, faini inaweza kuongezwa kulingana na kanuni za mchezo.\n\n"
                             .'Kama leo ni siku ya marejesho, mpokeaji atalipwa baada ya michango inayohitajika kukamilika. '
