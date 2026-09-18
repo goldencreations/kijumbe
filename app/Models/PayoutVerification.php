@@ -22,7 +22,7 @@ class PayoutVerification extends Model
         'payout_id', 'recipient_user_id', 'payment_phone', 'otp_hash', 'otp_expires_at',
         'otp_attempts', 'otp_verified_at', 'pin_verified_at', 'status', 'expires_at',
         'payment_quote_id', 'payment_quote_name', 'payment_quote_fee', 'payment_quote_total',
-        'payment_quote_expires_at',
+        'payment_quote_expires_at', 'payment_quote_name_source',
     ];
 
     protected function casts(): array

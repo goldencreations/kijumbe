@@ -629,6 +629,7 @@ class LiveIntegrationsTest extends TestCase
                 return [
                     'id' => 'quote-utc-001',
                     'account_name' => 'TEST RECIPIENT',
+                    'account_name_source' => 'cache',
                     'fee' => 20,
                     'total' => 820,
                     'expires_at' => '2026-09-17T19:10:00Z',
@@ -677,6 +678,7 @@ class LiveIntegrationsTest extends TestCase
         $verification->refresh();
 
         $this->assertSame('2026-09-17 22:10:00', $verification->payment_quote_expires_at->format('Y-m-d H:i:s'));
+        $this->assertSame('cache', $verification->payment_quote_name_source);
         $response = $security->confirmPayout($verification);
         $this->assertSame('processing', $response['status']);
         $this->assertSame(PayoutStatus::Processing, $payout->fresh()->status);
@@ -746,6 +748,142 @@ class LiveIntegrationsTest extends TestCase
         $this->assertNotSame($keys[0], $keys[1]);
         $this->assertStringStartsWith('payout-quote-KJP-WD-FRESH-QUOTE-001-', $keys[0]);
         $this->assertStringStartsWith('payout-quote-KJP-WD-FRESH-QUOTE-001-', $keys[1]);
+    }
+
+    public function test_ecofy_account_not_found_uses_named_merchant_fallback_quote(): void
+    {
+        config([
+            'services.payments.live_enabled' => true,
+            'services.ecofy.base_url' => 'https://ecofy.test',
+            'services.ecofy.api_key' => 'test-key',
+            'services.ecofy.merchant_id' => 'test-merchant',
+        ]);
+        Http::fakeSequence('https://ecofy.test/v1/payouts/quote')
+            ->push(['error' => [
+                'type' => 'invalid_request_error',
+                'code' => 'account_not_found',
+                'message' => 'We could not find that account.',
+            ]], 404)
+            ->push(['error' => [
+                'type' => 'invalid_request_error',
+                'code' => 'account_not_found',
+                'message' => 'We could not find that account.',
+            ]], 404)
+            ->push([
+                'id' => 'pq_merchant_001',
+                'account_name' => 'Office Recipient',
+                'account_name_source' => 'merchant',
+                'fee' => 20,
+                'total' => 820,
+                'expires_at' => now()->addMinutes(10)->utc()->toIso8601String(),
+            ], 201);
+
+        [, , $round] = $this->readyContribution(withReadyRound: true);
+        $round->recipient->groupMember->update(['member_name' => 'Office Recipient']);
+        $payout = Payout::create([
+            'round_id' => $round->id,
+            'recipient_cycle_member_id' => $round->recipient_cycle_member_id,
+            'amount' => 800,
+            'status' => PayoutStatus::Pending,
+            'destination_phone' => '255748281701',
+            'provider' => 'ecofy',
+            'order_reference' => 'KJP-WD-MERCHANT-FALLBACK-001',
+        ]);
+
+        $quote = app(PayoutGateway::class)->quote($payout);
+
+        $this->assertSame('merchant', $quote['account_name_source']);
+        $requests = Http::recorded()->values();
+        $this->assertCount(3, $requests);
+        $this->assertArrayNotHasKey('skip_account_check', $requests[0][0]->data());
+        $this->assertArrayNotHasKey('skip_account_check', $requests[1][0]->data());
+        $this->assertTrue($requests[2][0]->data()['skip_account_check']);
+        $this->assertSame('Office Recipient', $requests[2][0]->data()['account_name']);
+        $this->assertSame('MPESA', $requests[2][0]->data()['channel']);
+        $this->assertNotSame(
+            $requests[1][0]->header('Idempotency-Key')[0],
+            $requests[2][0]->header('Idempotency-Key')[0],
+        );
+    }
+
+    public function test_merchant_asserted_payout_name_is_clearly_warned_on_whatsapp(): void
+    {
+        [, , $round] = $this->readyContribution(withReadyRound: true);
+        $recipient = $round->recipient->groupMember->user;
+        $recipient->forceFill([
+            'phone' => '255748281701',
+            'whatsapp_wa_id' => '255748281701',
+            'whatsapp_opted_in_at' => now(),
+            'payout_pin_hash' => Hash::make('3512'),
+            'payout_pin_set_at' => now(),
+        ])->save();
+        $payout = Payout::create([
+            'round_id' => $round->id,
+            'recipient_cycle_member_id' => $round->recipient_cycle_member_id,
+            'amount' => 800,
+            'status' => PayoutStatus::Pending,
+            'destination_phone' => '255748281701',
+            'provider' => 'ecofy',
+            'order_reference' => 'KJP-WD-MERCHANT-WARNING-001',
+        ]);
+        PayoutVerification::create([
+            'payout_id' => $payout->id,
+            'recipient_user_id' => $recipient->id,
+            'payment_phone' => '255748281701',
+            'otp_hash' => Hash::make('123456'),
+            'otp_expires_at' => now()->addMinutes(5),
+            'otp_verified_at' => now(),
+            'status' => 'otp_verified',
+            'expires_at' => now()->addMinutes(15),
+        ]);
+
+        $gateway = new class implements PayoutGateway
+        {
+            public function quote(Payout $payout): array
+            {
+                return [
+                    'id' => 'pq_merchant_warning_001',
+                    'account_name' => 'DERICK',
+                    'account_name_source' => 'merchant',
+                    'fee' => 20,
+                    'total' => 820,
+                    'expires_at' => now()->addMinutes(10)->utc()->toIso8601String(),
+                ];
+            }
+
+            public function confirm(Payout $payout, string $quoteId): array
+            {
+                return [];
+            }
+
+            public function query(Payout $payout): array
+            {
+                return [];
+            }
+        };
+        $this->app->instance(PayoutGateway::class, $gateway);
+
+        $message = '';
+        $whatsapp = Mockery::mock(MetaWhatsAppClient::class);
+        $whatsapp->shouldReceive('sendText')->once()->andReturnUsing(function (User $user, string $text) use (&$message): WhatsappMessage {
+            $message = $text;
+
+            return new WhatsappMessage;
+        });
+        $this->app->instance(MetaWhatsAppClient::class, $whatsapp);
+        $session = app(WhatsappFlowSessionService::class)->startPayout($recipient, ['payout_id' => $payout->id]);
+        app(WhatsappFlowSessionService::class)->advance($session, 'await_payout_pin', ['payout_id' => $payout->id]);
+
+        app(WhatsappConversationService::class)->handle($recipient, [
+            'id' => 'wamid.payout.merchant.warning',
+            'text' => ['body' => '3512'],
+        ]);
+
+        $this->assertStringContainsString('Jina la akaunti: DERICK', $message);
+        $this->assertStringContainsString('halijathibitishwa na mtandao wa simu', $message);
+        $this->assertStringContainsString('Hakikisha jina na namba ni sahihi', $message);
+        $this->assertSame('merchant', $payout->fresh()->verification->payment_quote_name_source);
+        $this->assertSame('await_payout_confirmation', $session->fresh()->step_key);
     }
 
     public function test_processing_ecofy_payout_is_reconciled_to_paid(): void

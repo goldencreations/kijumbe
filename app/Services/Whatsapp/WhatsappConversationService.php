@@ -1196,9 +1196,14 @@ class WhatsappConversationService
     {
         $this->flowSessions->advance($session, 'await_payout_confirmation', $payload);
         $name = (string) ($quote['account_name'] ?? 'haikupatikana');
+        $source = match (strtolower((string) ($quote['account_name_source'] ?? 'rail'))) {
+            'cache' => 'Jina lilithibitishwa awali na mtoa huduma, lakini hakupatikana sasa.',
+            'merchant' => 'TAHADHARI: Jina hili limetolewa na Kijumbe na halijathibitishwa na mtandao wa simu.',
+            default => 'Jina limethibitishwa sasa na mtandao wa simu.',
+        };
         $fee = number_format((int) ($quote['fee'] ?? 0));
         $total = number_format((int) ($quote['total'] ?? 0));
-        $this->whatsapp->sendText($user, "Akaunti iliyothibitishwa ni: {$name}\nAda ya kutuma: TZS {$fee}\nJumla itakayotolewa kwenye salio la Kijumbe: TZS {$total}\n\nJibu NDIO kutuma fedha, au HAPANA kughairi.");
+        $this->whatsapp->sendText($user, "Jina la akaunti: {$name}\n{$source}\nAda ya kutuma: TZS {$fee}\nJumla itakayotolewa kwenye salio la Kijumbe: TZS {$total}\n\nHakikisha jina na namba ni sahihi. Jibu NDIO kutuma fedha, au HAPANA kughairi.");
     }
 
     private function startPinManagement(User $user): void

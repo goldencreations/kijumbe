@@ -57,6 +57,7 @@ class PayoutSecurityService
                 'expires_at' => now()->addMinutes(self::VERIFICATION_TTL_MINUTES),
                 'payment_quote_id' => null,
                 'payment_quote_name' => null,
+                'payment_quote_name_source' => null,
                 'payment_quote_fee' => 0,
                 'payment_quote_total' => 0,
                 'payment_quote_expires_at' => null,
@@ -127,6 +128,7 @@ class PayoutSecurityService
         $verification->update([
             'payment_quote_id' => (string) ($quote['id'] ?? ''),
             'payment_quote_name' => (string) ($quote['account_name'] ?? ''),
+            'payment_quote_name_source' => (string) ($quote['account_name_source'] ?? 'rail'),
             'payment_quote_fee' => (int) ($quote['fee'] ?? 0),
             'payment_quote_total' => (int) ($quote['total'] ?? $verification->payout->amount),
             'payment_quote_expires_at' => $this->providerDateTime($quote['expires_at'] ?? null),

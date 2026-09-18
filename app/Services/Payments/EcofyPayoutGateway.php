@@ -5,6 +5,7 @@ namespace App\Services\Payments;
 use App\Contracts\PayoutGateway;
 use App\Models\Payout;
 use Illuminate\Http\Client\PendingRequest;
+use Illuminate\Http\Client\Response;
 use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Str;
@@ -14,18 +15,47 @@ class EcofyPayoutGateway implements PayoutGateway
 {
     public function quote(Payout $payout): array
     {
-        $response = $this->client('payout-quote-'.$payout->order_reference.'-'.Str::ulid())->post('/v1/payouts/quote', [
+        $payload = [
             'amount' => (int) $payout->amount,
             'type' => 'mobile_money',
             'channel' => $this->channel($payout->destination_phone),
             'account' => $payout->destination_phone,
-        ]);
+        ];
+        $response = $this->quoteRequest($payout, $payload);
+        $code = strtolower((string) data_get($response->json(), 'error.code'));
 
-        if ($response->status() === 422 && data_get($response->json(), 'error.code') === 'insufficient_balance') {
-            throw new RuntimeException('Malipo yanasubiri salio la Kijumbe liongezwe kwa mtoa huduma. Tafadhali jaribu POKEA baadaye.');
+        if ($response->status() === 404 && in_array($code, ['account_not_found', 'not_found'], true)) {
+            $accountName = $this->assertedAccountName($payout);
+            if ($accountName === null) {
+                throw new RuntimeException('Akaunti haikupatikana kwa namba hiyo. Hakikisha namba na jina kamili la mpokeaji, kisha ujaribu tena.');
+            }
+
+            $response = $this->quoteRequest($payout, [
+                ...$payload,
+                'skip_account_check' => true,
+                'account_name' => $accountName,
+            ]);
+            $code = strtolower((string) data_get($response->json(), 'error.code'));
         }
 
-        return $response->throw()->json();
+        if ($response->failed()) {
+            Log::warning('Ecofy payout quote was rejected.', [
+                'payout_id' => $payout->id,
+                'order_reference' => $payout->order_reference,
+                'http_status' => $response->status(),
+                'provider_code' => $code,
+            ]);
+
+            throw new RuntimeException(match ($code) {
+                'insufficient_balance' => 'Malipo yanasubiri salio la Kijumbe liongezwe kwa mtoa huduma. Tafadhali jaribu POKEA baadaye.',
+                'account_not_found', 'not_found' => 'Akaunti haikupatikana kwa namba hiyo. Hakikisha namba na mtandao wa simu, kisha ujaribu tena.',
+                'lookup_unavailable' => 'Mtoa huduma hakuweza kuthibitisha akaunti kwa sasa. Tafadhali jaribu tena baadaye.',
+                'account_name_required' => 'Jina kamili la mpokeaji linahitajika kabla ya kuendelea. Wasiliana na Kijumbe.',
+                default => 'Mtoa huduma hakukubali kuthibitisha akaunti kwa sasa. Tafadhali jaribu tena baadaye.',
+            });
+        }
+
+        return $response->json();
     }
 
     public function confirm(Payout $payout, string $quoteId): array
@@ -94,6 +124,27 @@ class EcofyPayoutGateway implements PayoutGateway
         return $idempotencyKey
             ? $request->withHeaders(['Idempotency-Key' => $idempotencyKey])
             : $request;
+    }
+
+    /** @param array<string, mixed> $payload */
+    private function quoteRequest(Payout $payout, array $payload): Response
+    {
+        return $this->client('payout-quote-'.$payout->order_reference.'-'.Str::ulid())
+            ->post('/v1/payouts/quote', $payload);
+    }
+
+    private function assertedAccountName(Payout $payout): ?string
+    {
+        $payout->loadMissing('recipient.groupMember.user');
+        $name = trim((string) ($payout->recipient?->groupMember?->member_name
+            ?: $payout->recipient?->groupMember?->user?->name));
+        $name = preg_replace('/\s+/', ' ', $name) ?: '';
+
+        if ($name === '' || preg_match('/^WhatsApp\s+\d+$/i', $name)) {
+            return null;
+        }
+
+        return $name;
     }
 
     private function channel(string $phone): string
