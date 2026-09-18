@@ -47,7 +47,7 @@ class PaymentReconciliationService
 
         Payout::query()
             ->where('status', PayoutStatus::Processing->value)
-            ->where('updated_at', '<=', now()->subMinutes(2))
+            ->where('updated_at', '<=', now()->subMinute())
             ->limit(max(0, $limit - $processed))
             ->get()
             ->each(function (Payout $payout) use (&$processed): void {

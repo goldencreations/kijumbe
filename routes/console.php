@@ -17,7 +17,7 @@ Schedule::command('kijumbe:sync-michezo-payouts')
     ->withoutOverlapping();
 
 Schedule::command('kijumbe:reconcile-payments')
-    ->everyFiveMinutes()
+    ->everyMinute()
     ->withoutOverlapping();
 
 Schedule::command('kijumbe:notify-due-payouts')
