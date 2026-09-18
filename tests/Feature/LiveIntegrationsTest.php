@@ -938,6 +938,7 @@ class LiveIntegrationsTest extends TestCase
 
         $this->assertSame(1, app(PaymentReconciliationService::class)->reconcile());
         $this->assertSame(PayoutStatus::Paid, $payout->fresh()->status);
+        $this->assertSame('po_reconcile_paid_001', $payout->fresh()->provider_reference);
         $this->assertNotNull($payout->fresh()->processed_at);
         $this->assertSame('paid', $payout->fresh()->verification->status);
     }

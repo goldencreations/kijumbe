@@ -58,7 +58,7 @@ class PaymentReconciliationService
                 }
 
                 $data = [
-                    'id' => $response['reference'] ?? $payout->provider_reference ?? $payout->order_reference,
+                    'id' => $response['id'] ?? $payout->provider_reference ?? $response['reference'] ?? $payout->order_reference,
                     'status' => $status,
                     'orderReference' => $payout->order_reference,
                     'updatedAt' => now()->toIso8601ZuluString(),
