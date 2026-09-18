@@ -6,7 +6,7 @@
     <title>{{ $title }} | Kijumbe</title>
     @vite(['resources/css/app.css', 'resources/js/app.js'])
 </head>
-<body class="admin-app">
+<body class="admin-app" data-page="{{ $page }}">
     <button class="sidebar-overlay" aria-label="Close navigation" data-sidebar-close hidden></button>
     <aside class="sidebar" id="sidebar">
         <a class="brand" href="{{ route('admin.dashboard') }}"><span class="brand-icon"><i data-lucide="orbit"></i></span>kijumbe<span class="brand-dot">.</span></a>

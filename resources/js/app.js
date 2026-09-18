@@ -29,6 +29,25 @@ overlay?.addEventListener('click', closeSidebar);
 window.addEventListener('resize', closeSidebar);
 document.addEventListener('keydown', event => { if (event.key === 'Escape') closeSidebar(); });
 document.querySelector('[data-refresh]')?.addEventListener('click', () => location.reload());
+
+const processingPayoutRefreshInterval = 15000;
+const refreshProcessingPayouts = () => {
+    const administratorIsBusy = document.visibilityState !== 'visible'
+        || document.querySelector('dialog[open]')
+        || document.querySelector('input:focus, select:focus, textarea:focus');
+
+    if (administratorIsBusy) {
+        window.setTimeout(refreshProcessingPayouts, processingPayoutRefreshInterval);
+        return;
+    }
+
+    location.reload();
+};
+
+if (document.body.dataset.page === 'payouts' && document.querySelector('.badge-processing')) {
+    window.setTimeout(refreshProcessingPayouts, processingPayoutRefreshInterval);
+}
+
 document.querySelectorAll('[data-auto-submit]').forEach(el => el.addEventListener('change', () => el.form.requestSubmit()));
 document.querySelectorAll('[data-open-dialog]').forEach(button => button.addEventListener('click', () => document.getElementById(button.dataset.openDialog)?.showModal()));
 document.querySelectorAll('[data-close-dialog]').forEach(button => button.addEventListener('click', () => button.closest('dialog').close()));
