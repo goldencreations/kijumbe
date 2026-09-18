@@ -195,12 +195,13 @@ class MemberPaymentLedgerService
     public function materialize(Group $group): void
     {
         $startsAt = $group->cycle_starts_at?->copy() ?: now();
-        if ($startsAt->isFuture()) {
+        $materializeUntil = now()->endOfDay();
+        if ($startsAt->greaterThan($materializeUntil)) {
             return;
         }
 
         $interval = max((int) ($group->contribution_interval_days ?: $group->period_days ?: 1), 1);
-        $elapsedSeconds = max((int) $startsAt->diffInSeconds(now(), false), 0);
+        $elapsedSeconds = max((int) $startsAt->diffInSeconds($materializeUntil, false), 0);
         $rounds = intdiv($elapsedSeconds, $interval * 86400) + 1;
         $principal = (int) ($group->contribution_amount ?? $group->amount_per_day ?? 0);
         $fee = (int) ($group->kijumbe_fee ?? 0);
