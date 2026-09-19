@@ -125,6 +125,8 @@ if (notice && document.querySelector('#toast')) {
 Chart.defaults.font.family = "'Instrument Sans', sans-serif";
 Chart.defaults.font.size = 10;
 Chart.defaults.color = '#858d90';
+const reduceChartMotion = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+const chartAnimation = duration => reduceChartMotion ? false : { duration, easing: 'easeOutQuart' };
 const cashChart = document.querySelector('[data-cash-chart]');
 if (cashChart) {
     const rows = JSON.parse(cashChart.dataset.cashChart);
@@ -149,6 +151,7 @@ if (cashChart) {
         options: {
             responsive: true,
             maintainAspectRatio: false,
+            animation: chartAnimation(1200),
             interaction: { mode: 'index', intersect: false },
             plugins: {
                 legend: { display: false },
@@ -171,5 +174,5 @@ if (cashChart) {
 const groupChart = document.querySelector('[data-group-chart]');
 if (groupChart) {
     const groups = JSON.parse(groupChart.dataset.groupChart);
-    new Chart(groupChart, { type: 'doughnut', data: { labels: ['Active', 'Draft', 'Archived'], datasets: [{ data: [groups.active || 0, groups.draft || 0, groups.archived || 0], backgroundColor: ['#318e7b', '#d9ab58', '#c9cecf'], borderWidth: 3, hoverOffset: 4 }] }, options: { responsive: true, maintainAspectRatio: false, cutout: '76%', plugins: { legend: { display: false } } } });
+    new Chart(groupChart, { type: 'doughnut', data: { labels: ['Active', 'Draft', 'Archived'], datasets: [{ data: [groups.active || 0, groups.draft || 0, groups.archived || 0], backgroundColor: ['#318e7b', '#d9ab58', '#c9cecf'], borderWidth: 3, hoverOffset: 4 }] }, options: { responsive: true, maintainAspectRatio: false, cutout: '76%', animation: reduceChartMotion ? false : { animateRotate: true, animateScale: true, duration: 1100, easing: 'easeOutQuart' }, plugins: { legend: { display: false } } } });
 }
