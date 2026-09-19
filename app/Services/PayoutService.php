@@ -19,6 +19,7 @@ class PayoutService
         private readonly GroupAccess $access,
         private readonly AuditService $audit,
         private readonly MetaWhatsAppClient $whatsapp,
+        private readonly CycleCompletionNotifier $cycleCompletions,
     ) {}
 
     public function record(User $actor, Round $round, array $data): Payout
@@ -62,6 +63,9 @@ class PayoutService
         }, 3);
 
         $this->notifyOtherMembers($payout);
+        if ($payout->round?->cycle?->status === CycleStatus::Completed) {
+            $this->cycleCompletions->notify($payout->round->cycle);
+        }
 
         return $payout;
     }
@@ -104,6 +108,9 @@ class PayoutService
 
         if ($shouldNotify) {
             $this->notifyOtherMembers($completedPayout);
+            if ($completedPayout->round?->cycle?->status === CycleStatus::Completed) {
+                $this->cycleCompletions->notify($completedPayout->round->cycle);
+            }
         }
 
         return $completedPayout;
@@ -137,7 +144,8 @@ class PayoutService
         $round->update(['status' => RoundStatus::Paid, 'paid_at' => $payout->processed_at ?? now()]);
 
         $cycle = $round->cycle;
-        $unfinished = $cycle->rounds()
+        $hasEveryRound = $cycle->rounds()->count() >= (int) $cycle->member_count;
+        $unfinished = ! $hasEveryRound || $cycle->rounds()
             ->where('status', '!=', RoundStatus::Paid->value)
             ->exists();
         $hasBlockedRound = $cycle->rounds()->where('status', RoundStatus::Blocked->value)->exists();

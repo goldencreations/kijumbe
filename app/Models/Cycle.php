@@ -15,7 +15,7 @@ class Cycle extends Model
     protected $fillable = [
         'group_id', 'name', 'contribution_amount', 'currency', 'period_days',
         'grace_period_hours', 'starts_at', 'member_count', 'status',
-        'activated_at', 'completed_at',
+        'activated_at', 'completed_at', 'completion_notified_at',
     ];
 
     protected function casts(): array
@@ -25,6 +25,7 @@ class Cycle extends Model
             'starts_at' => 'datetime',
             'activated_at' => 'datetime',
             'completed_at' => 'datetime',
+            'completion_notified_at' => 'datetime',
             'contribution_amount' => 'integer',
             'member_count' => 'integer',
         ];

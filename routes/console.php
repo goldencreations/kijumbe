@@ -24,6 +24,10 @@ Schedule::command('kijumbe:notify-due-payouts')
     ->everyMinute()
     ->withoutOverlapping();
 
+Schedule::command('kijumbe:notify-cycle-completions')
+    ->everyMinute()
+    ->withoutOverlapping();
+
 Schedule::command('kijumbe:notify-contribution-reminders')
     ->everyFifteenMinutes()
     ->timezone('Africa/Dar_es_Salaam')

@@ -200,9 +200,18 @@ class MemberPaymentLedgerService
             return;
         }
 
+        $activeSlots = $group->slots()->where('status', 'active')->get();
+        if ($activeSlots->isEmpty()) {
+            return;
+        }
+
         $interval = max((int) ($group->contribution_interval_days ?: $group->period_days ?: 1), 1);
         $elapsedSeconds = max((int) $startsAt->diffInSeconds($materializeUntil, false), 0);
         $rounds = intdiv($elapsedSeconds, $interval * 86400) + 1;
+        $configuredRoundLimit = (int) ($group->member_slots ?? 0);
+        if ($configuredRoundLimit > 0) {
+            $rounds = min($rounds, $configuredRoundLimit, $activeSlots->count());
+        }
         $principal = (int) ($group->contribution_amount ?? $group->amount_per_day ?? 0);
         $fee = (int) ($group->kijumbe_fee ?? 0);
         $platformPercent = (int) ($group->platform_fee_percent ?? config('kijumbe.platform_fee_percent', 30));
@@ -214,7 +223,7 @@ class MemberPaymentLedgerService
             return;
         }
 
-        foreach ($group->slots()->where('status', 'active')->get() as $slot) {
+        foreach ($activeSlots as $slot) {
             for ($round = 1; $round <= $rounds; $round++) {
                 $dueAt = CarbonImmutable::instance($startsAt->copy()->addDays(($round - 1) * $interval));
                 $obligation = MemberPaymentObligation::query()->firstOrNew([

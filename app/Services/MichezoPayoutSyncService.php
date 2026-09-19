@@ -65,9 +65,7 @@ class MichezoPayoutSyncService
                 'grace_period_hours' => max((int) ($group->penalty_timing_hours ?? $group->grace_period_hours ?? 0), 0),
                 'starts_at' => $startsAt,
                 'member_count' => $slots->count(),
-                'status' => CycleStatus::Active,
                 'activated_at' => $cycle->activated_at ?: now(),
-                'completed_at' => null,
             ]);
 
             $cycleMembers = collect();
@@ -202,6 +200,24 @@ class MichezoPayoutSyncService
 
                 $synced++;
             }
+
+            $expectedRounds = $slots->count();
+            $rounds = $cycle->rounds()->whereBetween('number', [1, $expectedRounds]);
+            $hasEveryRound = (clone $rounds)->count() === $expectedRounds;
+            $hasUnpaidRound = (clone $rounds)
+                ->where('status', '!=', RoundStatus::Paid->value)
+                ->exists();
+            $hasBlockedRound = (clone $rounds)
+                ->where('status', RoundStatus::Blocked->value)
+                ->exists();
+            $completed = $hasEveryRound && ! $hasUnpaidRound;
+
+            $cycle->update([
+                'status' => $completed
+                    ? CycleStatus::Completed
+                    : ($hasBlockedRound ? CycleStatus::Blocked : CycleStatus::Active),
+                'completed_at' => $completed ? ($cycle->completed_at ?: now()) : null,
+            ]);
 
             return $synced;
         }, 3);

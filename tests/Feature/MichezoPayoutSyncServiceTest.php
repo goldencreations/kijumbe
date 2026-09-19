@@ -10,9 +10,13 @@ use App\Enums\RoundStatus;
 use App\Models\Group;
 use App\Models\GroupMember;
 use App\Models\GroupMemberSlot;
+use App\Models\Cycle;
+use App\Models\CycleMember;
+use App\Models\MemberPaymentObligation;
 use App\Models\PaymentAllocation;
 use App\Models\PaymentAttempt;
 use App\Models\Payout;
+use App\Models\Round;
 use App\Models\User;
 use App\Models\WhatsappMessage;
 use App\Services\MemberPaymentLedgerService;
@@ -39,6 +43,7 @@ class MichezoPayoutSyncServiceTest extends TestCase
             'contribution_amount' => 200,
             'currency' => 'TZS',
             'contribution_interval_days' => 1,
+            'member_slots' => 4,
             'cycle_starts_at' => '2026-09-16 16:10:00',
             'kijumbe_fee' => 50,
         ]);
@@ -46,7 +51,7 @@ class MichezoPayoutSyncServiceTest extends TestCase
             'group_id' => $group->id,
             'user_id' => $user->id,
             'member_name' => $user->name,
-            'majina_count' => 1,
+            'majina_count' => 4,
             'role' => GroupRole::Member,
             'is_active' => true,
             'joined_at' => now(),
@@ -58,6 +63,15 @@ class MichezoPayoutSyncServiceTest extends TestCase
             'payout_position' => 1,
             'status' => 'active',
         ]);
+        foreach (range(2, 4) as $position) {
+            GroupMemberSlot::create([
+                'group_id' => $group->id,
+                'group_member_id' => $membership->id,
+                'slot_number' => $position,
+                'payout_position' => $position,
+                'status' => 'active',
+            ]);
+        }
 
         app(MemberPaymentLedgerService::class)->materialize($group->fresh());
 
@@ -85,6 +99,7 @@ class MichezoPayoutSyncServiceTest extends TestCase
             'contribution_amount' => 200,
             'currency' => 'TZS',
             'contribution_interval_days' => 1,
+            'member_slots' => 3,
             'cycle_starts_at' => '2026-09-16 16:10:00',
             'kijumbe_fee' => 50,
         ]);
@@ -92,7 +107,7 @@ class MichezoPayoutSyncServiceTest extends TestCase
             'group_id' => $group->id,
             'user_id' => $user->id,
             'member_name' => $user->name,
-            'majina_count' => 1,
+            'majina_count' => 3,
             'role' => GroupRole::Member,
             'is_active' => true,
             'joined_at' => now(),
@@ -104,14 +119,26 @@ class MichezoPayoutSyncServiceTest extends TestCase
             'payout_position' => 1,
             'status' => 'active',
         ]);
+        foreach (range(2, 3) as $position) {
+            GroupMemberSlot::create([
+                'group_id' => $group->id,
+                'group_member_id' => $membership->id,
+                'slot_number' => $position,
+                'payout_position' => $position,
+                'status' => 'active',
+            ]);
+        }
 
         $ledger = app(MemberPaymentLedgerService::class);
         $ledger->materialize($group->fresh());
-        $slot->obligations()->update([
+        MemberPaymentObligation::query()
+            ->where('group_id', $group->id)
+            ->where('round_number', '<', 3)
+            ->update([
             'paid_amount' => 250,
             'status' => 'paid',
             'paid_at' => now(),
-        ]);
+            ]);
 
         Carbon::setTestNow(Carbon::parse('2026-09-18 09:00:00', 'Africa/Dar_es_Salaam'));
         $message = '';
@@ -127,12 +154,118 @@ class MichezoPayoutSyncServiceTest extends TestCase
         $this->assertSame(0, Artisan::call('kijumbe:notify-contribution-reminders'));
         $this->assertStringContainsString('Sent 1 contribution reminder(s).', Artisan::output());
         $this->assertStringContainsString('Mzunguko wa zamani zaidi ni 3', $message);
-        $this->assertStringContainsString('TZS 250', $message);
+        $this->assertStringContainsString('TZS 750', $message);
         $this->assertStringContainsString('kabla ya 16:10 EAT', $message);
         $this->assertSame(3, $slot->obligations()->count());
 
         $this->assertSame(0, Artisan::call('kijumbe:notify-contribution-reminders'));
         $this->assertStringContainsString('Sent 0 contribution reminder(s).', Artisan::output());
+        Carbon::setTestNow();
+    }
+
+    public function test_completed_cycle_is_not_reopened_and_members_are_notified_once(): void
+    {
+        Carbon::setTestNow(Carbon::parse('2026-09-19 16:15:00', 'Africa/Dar_es_Salaam'));
+        $user = User::factory()->create([
+            'phone' => '255700000001',
+            'whatsapp_wa_id' => '255700000001',
+            'whatsapp_opted_in_at' => now(),
+        ]);
+        $group = Group::create([
+            'name' => 'Completed mchezo',
+            'status' => GroupStatus::Active,
+            'created_by' => $user->id,
+            'contribution_amount' => 200,
+            'currency' => 'TZS',
+            'contribution_interval_days' => 1,
+            'payout_interval_days' => 1,
+            'member_slots' => 1,
+            'cycle_starts_at' => '2026-09-16 16:10:00',
+            'kijumbe_fee' => 50,
+        ]);
+        $membership = GroupMember::create([
+            'group_id' => $group->id,
+            'user_id' => $user->id,
+            'member_name' => $user->name,
+            'majina_count' => 1,
+            'role' => GroupRole::Coordinator,
+            'is_active' => true,
+            'joined_at' => now(),
+        ]);
+        $slot = GroupMemberSlot::create([
+            'group_id' => $group->id,
+            'group_member_id' => $membership->id,
+            'slot_number' => 1,
+            'payout_position' => 1,
+            'status' => 'active',
+        ]);
+        $obligation = $slot->obligations()->create([
+            'group_id' => $group->id,
+            'round_number' => 1,
+            'due_at' => '2026-09-16 16:10:00',
+            'principal_amount' => 200,
+            'kijumbe_fee_amount' => 50,
+            'platform_fee_percent' => 30,
+            'platform_fee_amount' => 15,
+            'coordinator_fee_amount' => 35,
+            'penalty_amount' => 0,
+            'paid_amount' => 250,
+            'status' => 'paid',
+            'paid_at' => now(),
+        ]);
+        $cycle = Cycle::create([
+            'group_id' => $group->id,
+            'name' => 'Michezo ledger',
+            'contribution_amount' => 200,
+            'currency' => 'TZS',
+            'period_days' => 1,
+            'grace_period_hours' => 2,
+            'starts_at' => '2026-09-16 16:10:00',
+            'member_count' => 1,
+            'status' => 'completed',
+            'activated_at' => now()->subDays(3),
+            'completed_at' => now(),
+        ]);
+        $cycleMember = CycleMember::create([
+            'cycle_id' => $cycle->id,
+            'group_member_id' => $membership->id,
+            'group_member_slot_id' => $slot->id,
+            'payout_position' => 1,
+            'status' => 'active',
+        ]);
+        Round::create([
+            'cycle_id' => $cycle->id,
+            'number' => 1,
+            'recipient_cycle_member_id' => $cycleMember->id,
+            'due_at' => '2026-09-16 16:10:00',
+            'grace_ends_at' => '2026-09-16 18:10:00',
+            'required_amount' => 200,
+            'collected_amount' => 200,
+            'payout_amount' => 200,
+            'status' => RoundStatus::Paid,
+            'paid_at' => now(),
+        ]);
+
+        app(MichezoPayoutSyncService::class)->sync($group->fresh());
+        $this->assertSame('completed', $cycle->fresh()->status->value);
+        $this->assertNotNull($cycle->fresh()->completed_at);
+        $this->assertFalse($slot->obligations()->where('round_number', 2)->exists());
+        $this->assertTrue($obligation->fresh()->exists);
+
+        $message = '';
+        $whatsapp = Mockery::mock(MetaWhatsAppClient::class);
+        $whatsapp->shouldReceive('sendText')->once()->andReturnUsing(function (User $recipient, string $text) use (&$message): WhatsappMessage {
+            $message = $text;
+
+            return new WhatsappMessage;
+        });
+        $this->app->instance(MetaWhatsAppClient::class, $whatsapp);
+
+        $this->assertSame(0, Artisan::call('kijumbe:notify-cycle-completions'));
+        $this->assertStringContainsString('MCHEZO UMEISHA', $message);
+        $this->assertStringContainsString('Completed mchezo', $message);
+        $this->assertNotNull($cycle->fresh()->completion_notified_at);
+        $this->assertSame(0, Artisan::call('kijumbe:notify-cycle-completions'));
         Carbon::setTestNow();
     }
 
