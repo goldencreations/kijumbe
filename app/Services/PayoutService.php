@@ -213,16 +213,17 @@ class PayoutService
 
     private function notifyCoordinatorFeePaid(Payout $payout): void
     {
-        $payout->loadMissing('cycle.group', 'recipientUser');
+        $payout->loadMissing('cycle.group', 'recipient.groupMember', 'recipientUser');
         $group = $payout->cycle?->group;
         $coordinator = $payout->recipientUser;
         if (! $group || ! $coordinator) {
             return;
         }
 
+        $coordinatorName = $payout->recipient?->groupMember?->member_name ?: $coordinator->name;
         $message = "ADA YA KIJUMBE IMELIPWA\n"
             ."Mchezo: {$group->name}\n"
-            ."Kijumbe: {$coordinator->name}\n"
+            ."Kijumbe: {$coordinatorName}\n"
             .'Kiasi: TZS '.number_format((int) $payout->amount)."\n"
             .'Muda: '.($payout->processed_at ?: now())->format('d/m/Y H:i')." EAT\n\n"
             .'Mgawanyo huu ni sehemu ya Kijumbe ya ada zilizokusanywa; sehemu ya platform imebaki tofauti.';

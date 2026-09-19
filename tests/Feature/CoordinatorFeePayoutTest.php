@@ -113,6 +113,7 @@ class CoordinatorFeePayoutTest extends TestCase
         $this->assertSame('completed', $cycle->fresh()->status->value);
         $this->assertNotNull($cycle->fresh()->completed_at);
         $this->assertStringContainsString('ADA YA KIJUMBE IMELIPWA', $paidMessage);
+        $this->assertStringContainsString('Kijumbe: Derick', $paidMessage);
         $this->assertStringContainsString('TZS 140', $paidMessage);
         Carbon::setTestNow();
     }
@@ -121,7 +122,7 @@ class CoordinatorFeePayoutTest extends TestCase
     private function completedCycleWithCollectedFees(): array
     {
         $coordinator = User::factory()->create([
-            'name' => 'Office Coordinator',
+            'name' => 'WhatsApp 255748281701',
             'phone' => '255748281701',
             'whatsapp_wa_id' => '255748281701',
             'whatsapp_opted_in_at' => now(),
@@ -147,7 +148,7 @@ class CoordinatorFeePayoutTest extends TestCase
             $membership = GroupMember::create([
                 'group_id' => $group->id,
                 'user_id' => $user->id,
-                'member_name' => $user->name,
+                'member_name' => $index === 0 ? 'Derick' : $user->name,
                 'majina_count' => 1,
                 'role' => $index === 0 ? GroupRole::Coordinator : GroupRole::Member,
                 'is_active' => true,
