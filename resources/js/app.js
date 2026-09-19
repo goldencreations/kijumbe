@@ -128,16 +128,44 @@ Chart.defaults.color = '#858d90';
 const cashChart = document.querySelector('[data-cash-chart]');
 if (cashChart) {
     const rows = JSON.parse(cashChart.dataset.cashChart);
+    const makeFill = context => {
+        const chart = context.chart;
+        const area = chart.chartArea;
+        if (!area) return 'rgba(49, 142, 123, 0.08)';
+        const gradient = chart.ctx.createLinearGradient(0, area.top, 0, area.bottom);
+        gradient.addColorStop(0, context.dataset.borderColor === '#318e7b' ? 'rgba(49, 142, 123, 0.18)' : 'rgba(37, 43, 45, 0.12)');
+        gradient.addColorStop(1, 'rgba(255, 255, 255, 0)');
+        return gradient;
+    };
     new Chart(cashChart, {
-        type: 'bar',
+        type: 'line',
         data: {
             labels: rows.map(row => new Date(row.date + 'T12:00:00').toLocaleDateString('en-GB', { day: 'numeric', month: 'short' })),
             datasets: [
-                { label: 'Collections', data: rows.map(row => row.collected), backgroundColor: '#318e7b', borderRadius: 3, maxBarThickness: 15 },
-                { label: 'Payouts', data: rows.map(row => row.paid), backgroundColor: '#252b2d', borderRadius: 3, maxBarThickness: 15 },
+                { label: 'Collections', data: rows.map(row => row.collected), borderColor: '#318e7b', backgroundColor: makeFill, fill: true, tension: 0.42, borderWidth: 2.4, pointRadius: 0, pointHoverRadius: 4, pointHoverBorderWidth: 2, pointHoverBackgroundColor: '#fff', pointHoverBorderColor: '#318e7b' },
+                { label: 'Payouts', data: rows.map(row => row.paid), borderColor: '#252b2d', backgroundColor: makeFill, fill: true, tension: 0.42, borderWidth: 2.4, pointRadius: 0, pointHoverRadius: 4, pointHoverBorderWidth: 2, pointHoverBackgroundColor: '#fff', pointHoverBorderColor: '#252b2d' },
             ],
         },
-        options: { responsive: true, maintainAspectRatio: false, plugins: { legend: { display: false }, tooltip: { callbacks: { label: ctx => `${ctx.dataset.label}: TZS ${ctx.parsed.y.toLocaleString()}` } } }, scales: { x: { grid: { display: false }, border: { display: false }, ticks: { maxTicksLimit: 7, maxRotation: 0 } }, y: { beginAtZero: true, border: { display: false }, grid: { color: '#f0f2f1' } } } },
+        options: {
+            responsive: true,
+            maintainAspectRatio: false,
+            interaction: { mode: 'index', intersect: false },
+            plugins: {
+                legend: { display: false },
+                tooltip: {
+                    backgroundColor: '#191b1d',
+                    padding: 11,
+                    cornerRadius: 6,
+                    displayColors: true,
+                    callbacks: { label: ctx => `${ctx.dataset.label}: TZS ${ctx.parsed.y.toLocaleString()}` },
+                },
+            },
+            scales: {
+                x: { grid: { display: false }, border: { display: false }, ticks: { maxTicksLimit: 7, maxRotation: 0, padding: 8 } },
+                y: { beginAtZero: true, border: { display: false }, grid: { color: '#edf0ef', drawTicks: false }, ticks: { padding: 8 } },
+            },
+            elements: { line: { capBezierPoints: true } },
+        },
     });
 }
 const groupChart = document.querySelector('[data-group-chart]');
