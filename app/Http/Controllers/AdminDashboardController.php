@@ -25,8 +25,8 @@ class AdminDashboardController extends Controller
     {
         $days = in_array($request->integer('days', 30), [7, 30, 90]) ? $request->integer('days', 30) : 30;
         $since = now('Africa/Dar_es_Salaam')->subDays($days - 1)->startOfDay();
-        $collected = Contribution::whereIn('status', ['paid', 'paid_late'])->whereBetween('paid_at', [$since->copy()->utc(), now()->utc()])->get(['amount', 'paid_at']);
-        $paid = Payout::where('status', 'paid')->whereBetween('processed_at', [$since->copy()->utc(), now()->utc()])->get(['amount', 'processed_at']);
+        $collected = Contribution::whereIn('status', ['paid', 'paid_late'])->whereBetween('paid_at', [$since, now('Africa/Dar_es_Salaam')])->get(['amount', 'paid_at']);
+        $paid = Payout::where('status', 'paid')->whereBetween('processed_at', [$since, now('Africa/Dar_es_Salaam')])->get(['amount', 'processed_at']);
         $series = [];
         if ($collected->isNotEmpty() || $paid->isNotEmpty()) {
             $collectionsByDate = $collected->groupBy(fn ($row) => $row->paid_at->timezone('Africa/Dar_es_Salaam')->format('Y-m-d'));
@@ -57,6 +57,10 @@ class AdminDashboardController extends Controller
 
     public function listing(Request $request, string $section): View
     {
+        if ($section === 'payments' && $request->boolean('overdue')) {
+            return $this->overdueContributions($request);
+        }
+
         $definitions = [
             'groups' => [Group::class, ['creator'], ['name', 'id', 'created_by_phone'], ['draft', 'active', 'archived']],
             'members' => [User::class, ['groupMemberships.group'], ['name', 'email', 'phone'], []],
@@ -141,6 +145,38 @@ class AdminDashboardController extends Controller
             'users' => in_array($section, ['whatsapp', 'groups']) ? User::where('is_active', true)->orderBy('name')->get() : collect(),
             'groups' => $section === 'payments' ? Group::query()->orderBy('name')->get(['id', 'name']) : collect(),
             'groupTypes' => $section === 'groups' ? [Group::TYPE_MONEY => 'Pesa', Group::TYPE_PRODUCT => 'Bidhaa'] : [],
+        ]);
+    }
+
+    private function overdueContributions(Request $request): View
+    {
+        $search = mb_substr(trim((string) $request->input('q', '')), 0, 120);
+        $query = Contribution::query()
+            ->with(['cycleMember.groupMember.user', 'round.cycle.group'])
+            ->where('status', 'pending')
+            ->where('due_at', '<', now('Africa/Dar_es_Salaam'))
+            ->when($request->filled('group_id'), fn ($query) => $query->whereHas('round.cycle', fn ($query) => $query->where('group_id', $request->input('group_id'))))
+            ->when($search !== '', function ($query) use ($search): void {
+                $query->where(function ($query) use ($search): void {
+                    $query->whereHas('cycleMember.groupMember.user', fn ($query) => $query
+                        ->where('name', 'like', '%'.$search.'%')
+                        ->orWhere('phone', 'like', '%'.$search.'%'))
+                        ->orWhereHas('round.cycle.group', fn ($query) => $query
+                            ->where('name', 'like', '%'.$search.'%')
+                            ->orWhere('group_code', 'like', '%'.$search.'%'));
+                });
+            })
+            ->when($request->filled('date_from'), fn ($query) => $query->whereDate('due_at', '>=', $request->input('date_from')))
+            ->when($request->filled('date_to'), fn ($query) => $query->whereDate('due_at', '<=', $request->input('date_to')));
+
+        return view('admin.list', [
+            'page' => 'payments',
+            'title' => 'Overdue contributions',
+            'records' => $query->latest('due_at')->paginate(15)->withQueryString(),
+            'statuses' => [],
+            'users' => collect(),
+            'groups' => Group::query()->orderBy('name')->get(['id', 'name']),
+            'groupTypes' => [],
         ]);
     }
 
