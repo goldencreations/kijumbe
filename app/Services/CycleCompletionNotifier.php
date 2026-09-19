@@ -10,7 +10,10 @@ use Illuminate\Support\Facades\Log;
 
 class CycleCompletionNotifier
 {
-    public function __construct(private readonly MetaWhatsAppClient $whatsapp) {}
+    public function __construct(
+        private readonly MetaWhatsAppClient $whatsapp,
+        private readonly CoordinatorFeePayoutService $coordinatorFees,
+    ) {}
 
     public function notify(Cycle $cycle): bool
     {
@@ -21,6 +24,8 @@ class CycleCompletionNotifier
             ->update(['completion_notified_at' => now()]);
 
         if ($claimed === 0) {
+            $this->coordinatorFees->ensureForCompletedCycle($cycle);
+
             return false;
         }
 
@@ -61,6 +66,8 @@ class CycleCompletionNotifier
                 ]);
             }
         }
+
+        $this->coordinatorFees->ensureForCompletedCycle($cycle);
 
         return true;
     }

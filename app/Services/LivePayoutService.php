@@ -59,6 +59,10 @@ class LivePayoutService
 
     public function approveAndSend(User $approver, Payout $payout): Payout
     {
+        if ($payout->isCoordinatorFee()) {
+            throw new ConflictHttpException('Coordinator fee payouts must be completed by the coordinator through the secure WhatsApp POKEA ADA flow.');
+        }
+
         $this->access->ensureManager($approver, $payout->round->cycle->group);
 
         $payout = DB::transaction(function () use ($approver, $payout): Payout {

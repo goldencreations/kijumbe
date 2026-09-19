@@ -61,7 +61,7 @@ class AdminDashboardController extends Controller
             'groups' => [Group::class, ['creator'], ['name', 'id', 'created_by_phone'], ['draft', 'active', 'archived']],
             'members' => [User::class, ['groupMemberships.group'], ['name', 'email', 'phone'], []],
             'payments' => [PaymentAttempt::class, ['initiator', 'contribution.round.cycle.group', 'contribution.cycleMember.groupMember.user', 'allocations.obligation.group', 'allocations.obligation.slot.groupMember.user'], ['order_reference', 'provider_reference', 'phone_e164'], array_map(fn (PaymentAttemptStatus $status): string => $status->value, PaymentAttemptStatus::cases())],
-            'payouts' => [Payout::class, ['recipient.groupMember.user', 'round.cycle.group', 'requester', 'approver'], ['order_reference', 'payment_reference', 'destination_phone'], ['pending', 'approved', 'processing', 'paid', 'failed', 'refunded', 'reversed']],
+            'payouts' => [Payout::class, ['recipient.groupMember.user', 'recipientUser', 'round.cycle.group', 'cycle.group', 'requester', 'approver'], ['order_reference', 'payment_reference', 'destination_phone'], ['pending', 'approved', 'processing', 'paid', 'failed', 'refunded', 'reversed']],
             'whatsapp' => [WhatsappMessage::class, ['user'], ['wa_id', 'template_name', 'meta_message_id'], ['queued', 'sent', 'delivered', 'read', 'failed', 'received']],
             'audit' => [AuditLog::class, ['actor'], ['action', 'auditable_id'], []],
             'exceptions' => [Round::class, ['cycle.group', 'recipient.groupMember.user'], [], ['in_grace', 'blocked']],
@@ -122,7 +122,9 @@ class AdminDashboardController extends Controller
                         ->orWhereHas('allocations.obligation.group', fn ($g) => $g->where('name', 'like', '%'.$search.'%')->orWhere('group_code', 'like', '%'.$search.'%'));
                 }
                 if ($section === 'payouts') {
-                    $q->orWhereHas('round.cycle.group', fn ($g) => $g->where('name', 'like', '%'.$search.'%'));
+                    $q->orWhereHas('round.cycle.group', fn ($g) => $g->where('name', 'like', '%'.$search.'%'))
+                        ->orWhereHas('cycle.group', fn ($g) => $g->where('name', 'like', '%'.$search.'%'))
+                        ->orWhereHas('recipientUser', fn ($u) => $u->where('name', 'like', '%'.$search.'%'));
                 }
                 if ($section === 'exceptions') {
                     $q->orWhereHas('cycle.group', fn ($g) => $g->where('name', 'like', '%'.$search.'%'));

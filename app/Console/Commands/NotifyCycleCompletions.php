@@ -19,7 +19,6 @@ class NotifyCycleCompletions extends Command
 
         Cycle::query()
             ->where('status', CycleStatus::Completed->value)
-            ->whereNull('completion_notified_at')
             ->chunkById(50, function ($cycles) use ($notifier, &$notified): void {
                 foreach ($cycles as $cycle) {
                     $notified += $notifier->notify($cycle) ? 1 : 0;

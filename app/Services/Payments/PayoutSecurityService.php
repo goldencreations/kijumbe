@@ -185,7 +185,7 @@ class PayoutSecurityService
 
     public function ensureRecipient(Payout $payout, User $recipient): void
     {
-        $expected = $payout->recipient?->groupMember?->user_id;
+        $expected = $payout->recipient_user_id ?: $payout->recipient?->groupMember?->user_id;
         if ((int) $expected !== (int) $recipient->id) {
             throw new RuntimeException('Mpokeaji wa malipo hakulingana na mzunguko huu.');
         }

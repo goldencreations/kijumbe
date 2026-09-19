@@ -126,16 +126,22 @@ class AdminOperationsController extends Controller
     public function payouts(Request $request): JsonResponse
     {
         $payouts = Payout::query()
-            ->with(['round.cycle.group', 'recipient.groupMember.user', 'requester:id,name,email', 'approver:id,name,email', 'verification'])
+            ->with(['round.cycle.group', 'cycle.group', 'recipient.groupMember.user', 'recipientUser', 'requester:id,name,email', 'approver:id,name,email', 'verification'])
             ->when($request->filled('status'), fn ($query) => $query->where('status', $request->string('status')->toString()))
-            ->when($request->filled('group_id'), fn ($query) => $query->whereHas('round.cycle', fn ($query) => $query->where('group_id', $request->input('group_id'))))
+            ->when($request->filled('group_id'), fn ($query) => $query->where(function ($query) use ($request): void {
+                $groupId = $request->input('group_id');
+                $query->whereHas('round.cycle', fn ($query) => $query->where('group_id', $groupId))
+                    ->orWhereHas('cycle', fn ($query) => $query->where('group_id', $groupId));
+            }))
             ->when($request->filled('search'), function ($query) use ($request): void {
                 $search = '%'.$request->string('search')->toString().'%';
                 $query->where(fn ($query) => $query
                     ->where('payment_reference', 'like', $search)
                     ->orWhere('destination_phone', 'like', $search)
+                    ->orWhereHas('recipientUser', fn ($query) => $query->where('name', 'like', $search)->orWhere('phone', 'like', $search))
                     ->orWhereHas('recipient.groupMember.user', fn ($query) => $query->where('name', 'like', $search)->orWhere('phone', 'like', $search))
-                    ->orWhereHas('round.cycle.group', fn ($query) => $query->where('name', 'like', $search)->orWhere('group_code', 'like', $search)));
+                    ->orWhereHas('round.cycle.group', fn ($query) => $query->where('name', 'like', $search)->orWhere('group_code', 'like', $search))
+                    ->orWhereHas('cycle.group', fn ($query) => $query->where('name', 'like', $search)->orWhere('group_code', 'like', $search)));
             })
             ->when($request->filled('from'), fn ($query) => $query->where('created_at', '>=', $request->date('from')))
             ->when($request->filled('to'), fn ($query) => $query->where('created_at', '<=', $request->date('to')))
@@ -149,7 +155,9 @@ class AdminOperationsController extends Controller
     {
         return response()->json(['data' => $payout->load([
             'round.cycle.group',
+            'cycle.group',
             'recipient.groupMember.user',
+            'recipientUser',
             'requester:id,name,email',
             'approver:id,name,email',
             'processor:id,name,email',

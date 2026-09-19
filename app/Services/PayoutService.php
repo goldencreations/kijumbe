@@ -75,7 +75,9 @@ class PayoutService
     {
         [$completedPayout, $shouldNotify] = DB::transaction(function () use ($payout, $providerReference, $payload): array {
             $payout = Payout::query()->lockForUpdate()->findOrFail($payout->id);
-            $round = Round::query()->lockForUpdate()->findOrFail($payout->round_id);
+            $round = $payout->round_id
+                ? Round::query()->lockForUpdate()->findOrFail($payout->round_id)
+                : null;
 
             if ($payout->status === PayoutStatus::Paid) {
                 return [$payout, false];
@@ -85,7 +87,7 @@ class PayoutService
                 throw new ConflictHttpException('The provider cannot complete a payout in its current state.');
             }
 
-            $before = $round->attributesToArray();
+            $before = $round?->attributesToArray();
             $payout->update([
                 'status' => PayoutStatus::Paid,
                 'provider_reference' => $providerReference,
@@ -94,22 +96,31 @@ class PayoutService
                 'processed_at' => now(),
             ]);
             $payout->verification()->update(['status' => 'paid']);
-            $this->finalizePaidRound($payout, $round);
+            if ($round) {
+                $this->finalizePaidRound($payout, $round);
+            }
             $this->audit->record(
                 'payout.provider_completed',
                 $payout,
                 null,
                 after: $payout->fresh()->attributesToArray(),
-                metadata: ['round_before' => $before, 'round_after' => $round->fresh()->attributesToArray()],
+                metadata: $round ? ['round_before' => $before, 'round_after' => $round->fresh()->attributesToArray()] : [
+                    'cycle_id' => $payout->cycle_id,
+                    'purpose' => $payout->purpose,
+                ],
             );
 
-            return [$payout->fresh()->load('recipient.groupMember.user', 'round'), true];
+            return [$payout->fresh()->load('recipient.groupMember.user', 'recipientUser', 'round.cycle.group', 'cycle.group'), true];
         }, 3);
 
         if ($shouldNotify) {
-            $this->notifyOtherMembers($completedPayout);
-            if ($completedPayout->round?->cycle?->status === CycleStatus::Completed) {
-                $this->cycleCompletions->notify($completedPayout->round->cycle);
+            if ($completedPayout->isCoordinatorFee()) {
+                $this->notifyCoordinatorFeePaid($completedPayout);
+            } else {
+                $this->notifyOtherMembers($completedPayout);
+                if ($completedPayout->round?->cycle?->status === CycleStatus::Completed) {
+                    $this->cycleCompletions->notify($completedPayout->round->cycle);
+                }
             }
         }
 
@@ -128,9 +139,11 @@ class PayoutService
             ]);
 
             if (in_array($status, [PayoutStatus::Refunded, PayoutStatus::Reversed], true)) {
-                $round = Round::query()->lockForUpdate()->findOrFail($payout->round_id);
-                $round->update(['status' => RoundStatus::Blocked, 'paid_at' => null]);
-                $round->cycle->update(['status' => CycleStatus::Blocked, 'completed_at' => null]);
+                if ($payout->round_id) {
+                    $round = Round::query()->lockForUpdate()->findOrFail($payout->round_id);
+                    $round->update(['status' => RoundStatus::Blocked, 'paid_at' => null]);
+                    $round->cycle->update(['status' => CycleStatus::Blocked, 'completed_at' => null]);
+                }
             }
 
             $this->audit->record('payout.provider_exception', $payout, null, after: $payout->fresh()->attributesToArray());
@@ -189,6 +202,45 @@ class PayoutService
                 $this->whatsapp->sendText($member, $message);
             } catch (\Throwable $exception) {
                 Log::warning('Payout completed but group member WhatsApp notification failed.', [
+                    'payout_id' => $payout->id,
+                    'group_id' => $group->id,
+                    'member_user_id' => $member->id,
+                    'error' => $exception->getMessage(),
+                ]);
+            }
+        }
+    }
+
+    private function notifyCoordinatorFeePaid(Payout $payout): void
+    {
+        $payout->loadMissing('cycle.group', 'recipientUser');
+        $group = $payout->cycle?->group;
+        $coordinator = $payout->recipientUser;
+        if (! $group || ! $coordinator) {
+            return;
+        }
+
+        $message = "ADA YA KIJUMBE IMELIPWA\n"
+            ."Mchezo: {$group->name}\n"
+            ."Kijumbe: {$coordinator->name}\n"
+            .'Kiasi: TZS '.number_format((int) $payout->amount)."\n"
+            .'Muda: '.($payout->processed_at ?: now())->format('d/m/Y H:i')." EAT\n\n"
+            .'Mgawanyo huu ni sehemu ya Kijumbe ya ada zilizokusanywa; sehemu ya platform imebaki tofauti.';
+
+        $members = User::query()
+            ->where('is_active', true)
+            ->whereNotNull('whatsapp_opted_in_at')
+            ->whereNull('whatsapp_opted_out_at')
+            ->whereHas('groupMemberships', fn ($query) => $query
+                ->where('group_id', $group->id)
+                ->where('is_active', true))
+            ->get();
+
+        foreach ($members as $member) {
+            try {
+                $this->whatsapp->sendText($member, $message);
+            } catch (\Throwable $exception) {
+                Log::warning('Coordinator fee paid but a group WhatsApp notification failed.', [
                     'payout_id' => $payout->id,
                     'group_id' => $group->id,
                     'member_user_id' => $member->id,

@@ -72,7 +72,7 @@ class WhatsappConversationService
             return;
         }
 
-        if (in_array($command, ['POKEA', 'POKEA FEDHA', 'POKEA PESA'], true)) {
+        if (in_array($command, ['POKEA', 'POKEA FEDHA', 'POKEA PESA', 'POKEA ADA'], true)) {
             $this->startPayoutFlow($user);
 
             return;
@@ -1045,10 +1045,16 @@ class WhatsappConversationService
     private function startPayoutFlow(User $user): void
     {
         $payout = Payout::query()
-            ->with('round.cycle.group')
+            ->with(['round.cycle.group', 'cycle.group'])
             ->whereIn('status', ['pending', 'approved'])
-            ->whereHas('round', fn ($query) => $query->where('status', 'ready_for_payout'))
-            ->whereHas('recipient.groupMember', fn ($query) => $query->where('user_id', $user->id))
+            ->where(function ($query): void {
+                $query->where('purpose', Payout::PURPOSE_COORDINATOR_FEE)
+                    ->orWhereHas('round', fn ($query) => $query->where('status', 'ready_for_payout'));
+            })
+            ->where(function ($query) use ($user): void {
+                $query->where('recipient_user_id', $user->id)
+                    ->orWhereHas('recipient.groupMember', fn ($query) => $query->where('user_id', $user->id));
+            })
             ->oldest('created_at')
             ->first();
 
@@ -1059,7 +1065,8 @@ class WhatsappConversationService
         }
 
         $this->flowSessions->startPayout($user, ['payout_id' => $payout->id]);
-        $this->whatsapp->sendText($user, 'Tuma namba ya simu utakayotumia kupokea TZS '.number_format((int) $payout->amount).'. Mfano 0748281701. Tuma KATISHA ukitaka kuacha.');
+        $label = $payout->isCoordinatorFee() ? 'ada yako ya Kijumbe' : 'marejesho yako';
+        $this->whatsapp->sendText($user, 'Tuma namba ya simu utakayotumia kupokea '.$label.' ya TZS '.number_format((int) $payout->amount).'. Mfano 0748281701. Tuma KATISHA ukitaka kuacha.');
     }
 
     /** @param array<string, mixed> $message */
@@ -1072,7 +1079,7 @@ class WhatsappConversationService
 
         $text = trim((string) (data_get($message, 'text.body') ?? ''));
         $payload = $session->payload ?? [];
-        $payout = Payout::query()->with('round.cycle.group')->find($payload['payout_id'] ?? null);
+        $payout = Payout::query()->with(['round.cycle.group', 'cycle.group'])->find($payload['payout_id'] ?? null);
         if (! $payout) {
             $this->flowSessions->complete($session);
             $this->whatsapp->sendText($user, 'Malipo hayawezi kupatikana. Tuma POKEA tena siku yako ya kupokea ikifika.');

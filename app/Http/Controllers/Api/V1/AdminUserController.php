@@ -182,8 +182,11 @@ class AdminUserController extends Controller
     public function receivedPayments(User $user): JsonResponse
     {
         $received = Payout::query()
-            ->whereHas('recipient.groupMember', fn ($query) => $query->where('user_id', $user->id))
-            ->with(['round.cycle', 'recipient.groupMember.group'])
+            ->where(function ($query) use ($user): void {
+                $query->where('recipient_user_id', $user->id)
+                    ->orWhereHas('recipient.groupMember', fn ($query) => $query->where('user_id', $user->id));
+            })
+            ->with(['round.cycle', 'cycle', 'recipient.groupMember.group', 'recipientUser'])
             ->latest('id')
             ->get();
 

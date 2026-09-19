@@ -20,7 +20,7 @@ class RequeueFailedPayout extends Command
     {
         $payout = DB::transaction(function () use ($audit): ?Payout {
             $payout = Payout::query()
-                ->with(['round.cycle.group', 'recipient.groupMember.user', 'verification'])
+                ->with(['round.cycle.group', 'cycle.group', 'recipient.groupMember.user', 'recipientUser', 'verification'])
                 ->lockForUpdate()
                 ->find($this->argument('payout'));
 
@@ -42,8 +42,14 @@ class RequeueFailedPayout extends Command
                 return null;
             }
 
-            if ($payout->round?->status !== RoundStatus::ReadyForPayout) {
+            if (! $payout->isCoordinatorFee() && $payout->round?->status !== RoundStatus::ReadyForPayout) {
                 $this->error('The payout round is not ready for payout.');
+
+                return null;
+            }
+
+            if ($payout->isCoordinatorFee() && $payout->cycle?->status?->value !== 'completed') {
+                $this->error('The coordinator fee payout cycle is not completed.');
 
                 return null;
             }
@@ -73,18 +79,19 @@ class RequeueFailedPayout extends Command
                 metadata: ['reason' => 'No provider reference or initiation timestamp existed.'],
             );
 
-            return $payout->fresh(['round.cycle.group', 'recipient.groupMember.user']);
+            return $payout->fresh(['round.cycle.group', 'cycle.group', 'recipient.groupMember.user', 'recipientUser']);
         }, 3);
 
         if (! $payout) {
             return self::FAILURE;
         }
 
-        $recipient = $payout->recipient?->groupMember?->user;
+        $recipient = $payout->recipientUser ?: $payout->recipient?->groupMember?->user;
         if ($this->option('notify') && $recipient) {
+            $cycle = $payout->cycle ?: $payout->round?->cycle;
             $whatsapp->sendText(
                 $recipient,
-                'Malipo yako ya TZS '.number_format((int) $payout->amount).' katika '.$payout->round->cycle->group->name.' yamerudishwa kwenye foleni salama. Tuma POKEA kuanza uthibitisho upya.',
+                'Malipo yako ya TZS '.number_format((int) $payout->amount).' katika '.($cycle?->group?->name ?: 'mchezo wako').' yamerudishwa kwenye foleni salama. Tuma '.($payout->isCoordinatorFee() ? 'POKEA ADA' : 'POKEA').' kuanza uthibitisho upya.',
             );
         }
 

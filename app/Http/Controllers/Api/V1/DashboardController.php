@@ -52,14 +52,17 @@ class DashboardController extends Controller
             ->get();
 
         $payoutActions = Payout::query()
-            ->with(['round.cycle.group', 'recipient.groupMember.user', 'requester'])
+            ->with(['round.cycle.group', 'cycle.group', 'recipient.groupMember.user', 'recipientUser', 'requester'])
             ->whereIn('status', [
                 PayoutStatus::Pending->value,
                 PayoutStatus::Failed->value,
                 PayoutStatus::Refunded->value,
                 PayoutStatus::Reversed->value,
             ])
-            ->when($groupId, fn ($query) => $query->whereHas('round.cycle', fn ($query) => $query->where('group_id', $groupId)))
+            ->when($groupId, fn ($query) => $query->where(function ($query) use ($groupId): void {
+                $query->whereHas('round.cycle', fn ($query) => $query->where('group_id', $groupId))
+                    ->orWhereHas('cycle', fn ($query) => $query->where('group_id', $groupId));
+            }))
             ->latest('updated_at')
             ->limit(6)
             ->get();
@@ -83,16 +86,22 @@ class DashboardController extends Controller
                 'cycle_id' => $round->cycle_id,
                 'round_id' => $round->id,
             ]))
-            ->concat($payoutActions->map(fn (Payout $payout) => [
-                'key' => 'payout-'.$payout->id,
-                'type' => 'payout',
-                'severity' => $payout->status === PayoutStatus::Pending ? 'calm' : 'danger',
-                'title' => $payout->status === PayoutStatus::Pending ? 'Payout awaiting approval' : 'Payout needs reconciliation',
-                'subtitle' => $payout->round->cycle->group->name.' · TZS '.number_format($payout->amount),
-                'cycle_id' => $payout->round->cycle_id,
-                'round_id' => $payout->round_id,
-                'payout_id' => $payout->id,
-            ]))
+            ->concat($payoutActions->map(function (Payout $payout): array {
+                $cycle = $payout->cycle ?: $payout->round?->cycle;
+
+                return [
+                    'key' => 'payout-'.$payout->id,
+                    'type' => $payout->isCoordinatorFee() ? 'coordinator_fee_payout' : 'payout',
+                    'severity' => $payout->status === PayoutStatus::Pending ? 'calm' : 'danger',
+                    'title' => $payout->isCoordinatorFee() && $payout->status === PayoutStatus::Pending
+                        ? 'Coordinator fee awaiting secure claim'
+                        : ($payout->status === PayoutStatus::Pending ? 'Payout awaiting approval' : 'Payout needs reconciliation'),
+                    'subtitle' => ($cycle?->group?->name ?: 'Unknown group').' · TZS '.number_format($payout->amount),
+                    'cycle_id' => $cycle?->id,
+                    'round_id' => $payout->round_id,
+                    'payout_id' => $payout->id,
+                ];
+            }))
             ->take(12)
             ->values();
 
@@ -108,7 +117,10 @@ class DashboardController extends Controller
                 'attention_count' => $attention->count(),
                 'pending_payouts' => Payout::query()
                     ->where('status', PayoutStatus::Pending->value)
-                    ->when($groupId, fn ($query) => $query->whereHas('round.cycle', fn ($query) => $query->where('group_id', $groupId)))
+                    ->when($groupId, fn ($query) => $query->where(function ($query) use ($groupId): void {
+                        $query->whereHas('round.cycle', fn ($query) => $query->where('group_id', $groupId))
+                            ->orWhereHas('cycle', fn ($query) => $query->where('group_id', $groupId));
+                    }))
                     ->count(),
             ],
             'selected_group_id' => $groupId,
@@ -152,11 +164,16 @@ class DashboardController extends Controller
             'payouts' => Payout::query()
                 ->with([
                     'round.cycle.group',
+                    'cycle.group',
                     'recipient.groupMember.user',
+                    'recipientUser',
                     'requester',
                     'approver',
                 ])
-                ->when($groupId, fn ($query) => $query->whereHas('round.cycle', fn ($query) => $query->where('group_id', $groupId)))
+                ->when($groupId, fn ($query) => $query->where(function ($query) use ($groupId): void {
+                    $query->whereHas('round.cycle', fn ($query) => $query->where('group_id', $groupId))
+                        ->orWhereHas('cycle', fn ($query) => $query->where('group_id', $groupId));
+                }))
                 ->latest()
                 ->limit(100)
                 ->get(),

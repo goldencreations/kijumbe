@@ -135,8 +135,9 @@ class EcofyPayoutGateway implements PayoutGateway
 
     private function assertedAccountName(Payout $payout): ?string
     {
-        $payout->loadMissing('recipient.groupMember.user');
-        $name = trim((string) ($payout->recipient?->groupMember?->member_name
+        $payout->loadMissing('recipient.groupMember.user', 'recipientUser');
+        $name = trim((string) ($payout->recipientUser?->name
+            ?: $payout->recipient?->groupMember?->member_name
             ?: $payout->recipient?->groupMember?->user?->name));
         $name = preg_replace('/\s+/', ' ', $name) ?: '';
 
