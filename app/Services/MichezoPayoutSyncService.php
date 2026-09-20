@@ -185,13 +185,15 @@ class MichezoPayoutSyncService
                     'number' => $roundNumber,
                 ]);
                 $roundWasPaid = $round->exists && $round->status === RoundStatus::Paid;
-                $roundData = [
+                $roundData = $roundWasPaid ? [
+                    'status' => RoundStatus::Paid,
+                ] : [
                     'recipient_cycle_member_id' => $recipient->id,
                     'due_at' => $roundDueAt,
                     'grace_ends_at' => $graceEndsAt,
                     'required_amount' => $required,
                     'collected_amount' => $collected,
-                    'status' => $roundWasPaid ? RoundStatus::Paid : $status,
+                    'status' => $status,
                 ];
                 if (! $roundWasPaid) {
                     $roundData += [

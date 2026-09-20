@@ -227,13 +227,8 @@ class MemberPaymentLedgerService
                     'group_member_slot_id' => $slot->id,
                     'round_number' => $round,
                 ]);
-                $penaltyDeadline = $dueAt->addHours($penaltyHours);
-                $wasPaidLate = $obligation->paid_at?->greaterThan($penaltyDeadline) ?? false;
-                $isStillLate = ! $obligation->paid_at && now()->greaterThan($penaltyDeadline);
-                $latePenalty = $penalty > 0 && ($wasPaidLate || $isStillLate) ? $penalty : 0;
                 $paidAmount = (int) ($obligation->paid_amount ?? 0);
-                $hasCommittedLegacyFee = $obligation->exists
-                    && (int) $obligation->kijumbe_fee_amount > 0
+                $hasCommittedPayment = $obligation->exists
                     && ($paidAmount > 0 || $obligation->allocations()
                         ->whereHas('attempt', fn ($query) => $query->whereIn('status', [
                             PaymentAttemptStatus::Created->value,
@@ -241,15 +236,22 @@ class MemberPaymentLedgerService
                             PaymentAttemptStatus::Successful->value,
                         ]))
                         ->exists());
-                $legacyFee = $hasCommittedLegacyFee ? (int) $obligation->kijumbe_fee_amount : 0;
-                [$platformFee, $coordinatorFee] = Group::splitKijumbeFee($legacyFee, $platformPercent);
-                $totalDue = $principal + $legacyFee + $latePenalty;
+                if ($hasCommittedPayment) {
+                    continue;
+                }
+
+                $penaltyDeadline = $dueAt->addHours($penaltyHours);
+                $wasPaidLate = $obligation->paid_at?->greaterThan($penaltyDeadline) ?? false;
+                $isStillLate = ! $obligation->paid_at && now()->greaterThan($penaltyDeadline);
+                $latePenalty = $penalty > 0 && ($wasPaidLate || $isStillLate) ? $penalty : 0;
+                [$platformFee, $coordinatorFee] = Group::splitKijumbeFee(0, $platformPercent);
+                $totalDue = $principal + $latePenalty;
 
                 $obligation->fill([
                     'group_id' => $group->id,
                     'due_at' => $dueAt,
                     'principal_amount' => $principal,
-                    'kijumbe_fee_amount' => $legacyFee,
+                    'kijumbe_fee_amount' => 0,
                     'platform_fee_percent' => $platformPercent,
                     'platform_fee_amount' => $platformFee,
                     'coordinator_fee_amount' => $coordinatorFee,

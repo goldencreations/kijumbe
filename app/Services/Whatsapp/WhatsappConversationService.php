@@ -3,14 +3,17 @@
 namespace App\Services\Whatsapp;
 
 use App\Enums\ContributionStatus;
+use App\Enums\PaymentAttemptStatus;
 use App\Models\Contribution;
 use App\Models\Group;
+use App\Models\MemberPaymentObligation;
 use App\Models\Payout;
 use App\Models\User;
 use App\Models\WhatsappFlowSession;
 use App\Services\DailyContributionService;
 use App\Services\GroupFinancialReportService;
 use App\Services\MemberPaymentLedgerService;
+use App\Services\MichezoPayoutSyncService;
 use App\Services\PaymentAttemptService;
 use App\Services\Payments\PayoutSecurityService;
 use App\Services\PhoneNumber;
@@ -31,6 +34,7 @@ class WhatsappConversationService
         private readonly GroupMemberFlowService $groupMembers,
         private readonly DailyContributionService $dailyContributions,
         private readonly MemberPaymentLedgerService $memberPaymentLedger,
+        private readonly MichezoPayoutSyncService $michezoPayouts,
         private readonly GroupFinancialReportService $financialReports,
         private readonly PhoneNumber $phones,
         private readonly PayoutSecurityService $payoutSecurity,
@@ -523,9 +527,9 @@ class WhatsappConversationService
         }
 
         if ($session->step_key === 'choose_edit_field') {
-            if (! $this->groupMembers->isCreator($user, $group) || $this->groupHasStarted($group)) {
+            if (! $this->financialReports->isCoordinator($user, $group)) {
                 $this->flowSessions->complete($session);
-                $this->whatsapp->sendText($user, 'Taarifa za mchezo haziwezi kubadilishwa baada ya mchezo kuanza.');
+                $this->whatsapp->sendText($user, 'Ni Kijumbe wa mchezo pekee anayeweza kubadili taarifa za mchezo.');
 
                 return true;
             }
@@ -545,9 +549,9 @@ class WhatsappConversationService
         }
 
         if ($session->step_key === 'await_edit_value') {
-            if (! $this->groupMembers->isCreator($user, $group) || $this->groupHasStarted($group)) {
+            if (! $this->financialReports->isCoordinator($user, $group)) {
                 $this->flowSessions->complete($session);
-                $this->whatsapp->sendText($user, 'Taarifa za mchezo haziwezi kubadilishwa baada ya mchezo kuanza.');
+                $this->whatsapp->sendText($user, 'Ni Kijumbe wa mchezo pekee anayeweza kubadili taarifa za mchezo.');
 
                 return true;
             }
@@ -562,7 +566,7 @@ class WhatsappConversationService
             }
 
             try {
-                $updatedGroup = $this->updateGroupDetails($user, $group, $field, $value);
+                $change = $this->updateGroupDetails($user, $group, $field, $value);
             } catch (\RuntimeException $exception) {
                 $this->whatsapp->sendText($user, $exception->getMessage());
 
@@ -570,7 +574,7 @@ class WhatsappConversationService
             }
 
             $this->flowSessions->complete($session);
-            $this->notifyGroupDetailsChanged($updatedGroup);
+            $this->notifyGroupDetailsChanged($change['group'], $user, $field, $change['before'], $change['after']);
 
             return true;
         }
@@ -597,6 +601,7 @@ class WhatsappConversationService
     {
         $isMember = $this->groupMembers->isMember($user, $group);
         $isCreator = $this->groupMembers->isCreator($user, $group);
+        $isCoordinator = $this->financialReports->isCoordinator($user, $group);
 
         if ($choice === 'join') {
             if ($isMember) {
@@ -662,14 +667,8 @@ class WhatsappConversationService
         }
 
         if ($choice === 'edit') {
-            if (! $isCreator) {
+            if (! $isCoordinator) {
                 $this->whatsapp->sendText($user, 'Ni Kijumbe wa mchezo pekee anayeweza kubadili taarifa za mchezo.');
-
-                return true;
-            }
-            if ($this->groupHasStarted($group)) {
-                $this->whatsapp->sendText($user, 'Taarifa za mchezo haziwezi kubadilishwa baada ya mchezo kuanza.');
-                $this->flowSessions->complete($session);
 
                 return true;
             }
@@ -742,6 +741,7 @@ class WhatsappConversationService
     {
         $isMember = $this->groupMembers->isMember($user, $group);
         $isCreator = $this->groupMembers->isCreator($user, $group);
+        $isCoordinator = $this->financialReports->isCoordinator($user, $group);
 
         $menu = $this->groupMembers->summary($group)."\n\nChagua huduma:\n";
         if (! $isMember) {
@@ -753,7 +753,7 @@ class WhatsappConversationService
         if ($isMember || $isCreator) {
             $menu .= "3. Taarifa za kundi\n";
         }
-        if ($isCreator && ! $this->groupHasStarted($group)) {
+        if ($isCoordinator) {
             $menu .= "4. Badili taarifa za mchezo\n";
         }
         $menu .= 'Tuma chaguo au namba ya kikundi tena.';
@@ -910,11 +910,6 @@ class WhatsappConversationService
         };
     }
 
-    private function groupHasStarted(Group $group): bool
-    {
-        return $group->cycle_starts_at !== null && $group->cycle_starts_at->isPast();
-    }
-
     private function editableGroupFieldFromNumber(string $text): ?string
     {
         return [
@@ -954,12 +949,17 @@ class WhatsappConversationService
         $this->whatsapp->sendText($user, $question);
     }
 
-    private function updateGroupDetails(User $user, Group $group, string $field, mixed $value): Group
+    /** @return array{group: Group, before: mixed, after: mixed} */
+    private function updateGroupDetails(User $user, Group $group, string $field, mixed $value): array
     {
-        return DB::transaction(function () use ($user, $group, $field, $value): Group {
+        $change = DB::transaction(function () use ($user, $group, $field, $value): array {
             $locked = Group::query()->whereKey($group->id)->lockForUpdate()->firstOrFail();
-            if (! $this->groupMembers->isCreator($user, $locked) || $this->groupHasStarted($locked)) {
-                throw new \RuntimeException('Taarifa za mchezo haziwezi kubadilishwa baada ya mchezo kuanza.');
+            if (! $this->financialReports->isCoordinator($user, $locked)) {
+                throw new \RuntimeException('Ni Kijumbe wa mchezo pekee anayeweza kubadili taarifa za mchezo.');
+            }
+
+            if (in_array($field, ['member_slots', 'cycle_starts_at'], true) && $this->groupHasFinancialActivity($locked)) {
+                throw new \RuntimeException('Taarifa hii haiwezi kubadilishwa baada ya malipo kuanza. Badili ada, faini au ratiba ya mizunguko ya baadaye badala yake.');
             }
 
             if ($field === 'member_slots') {
@@ -983,19 +983,52 @@ class WhatsappConversationService
                 'penalty_timing_hours' => ['penalty_timing_hours' => (int) $value, 'grace_period_hours' => (int) $value],
                 default => throw new \RuntimeException('Taarifa hiyo haiwezi kubadilishwa.'),
             };
+            $primaryAttribute = match ($field) {
+                'group_name' => 'name',
+                default => $field,
+            };
+            $before = $locked->getAttribute($primaryAttribute);
             $locked->update($updates);
 
             if ($field === 'leader_name') {
                 $locked->memberships()->where('user_id', $user->id)->where('is_active', true)->update(['member_name' => $value]);
             }
 
-            return $locked->fresh();
+            $fresh = $locked->fresh();
+
+            return [
+                'group' => $fresh,
+                'before' => $before,
+                'after' => $fresh->getAttribute($primaryAttribute),
+            ];
         });
+
+        if (in_array($field, [
+            'contribution_amount',
+            'contribution_interval_days',
+            'payout_interval_days',
+            'cycle_starts_at',
+            'kijumbe_fee',
+            'penalty_amount',
+            'penalty_timing_hours',
+        ], true)) {
+            $this->memberPaymentLedger->materialize($change['group']);
+            $this->michezoPayouts->sync($change['group']);
+        }
+
+        return $change;
     }
 
-    private function notifyGroupDetailsChanged(Group $group): void
+    private function notifyGroupDetailsChanged(Group $group, User $actor, string $field, mixed $before, mixed $after): void
     {
-        $message = "Taarifa za mchezo wa {$group->name} zimebadilishwa na Kijumbe.\n\n".$this->groupMembers->summary($group);
+        $label = $this->groupEditFieldLabel($field);
+        $message = "TAARIFA ZA MCHEZO ZIMEBADILISHWA\n"
+            ."Mchezo: {$group->name}\n"
+            ."Kijumbe: {$actor->name}\n"
+            ."Kilichobadilishwa: {$label}\n"
+            .'Ilikuwa: '.$this->formatGroupEditValue($field, $before)."\n"
+            .'Sasa: '.$this->formatGroupEditValue($field, $after)."\n\n"
+            .'Mabadiliko ya fedha na ratiba yanatumika kwenye mizunguko ambayo haijalipwa; historia iliyolipwa haibadilishwi.';
         $members = $group->memberships()->with('user')->where('is_active', true)->get();
         foreach ($members as $member) {
             try {
@@ -1004,6 +1037,59 @@ class WhatsappConversationService
                 // A notification failure must not undo the saved update.
             }
         }
+    }
+
+    private function groupHasFinancialActivity(Group $group): bool
+    {
+        return MemberPaymentObligation::query()
+            ->where('group_id', $group->id)
+            ->where(function ($query): void {
+                $query->where('paid_amount', '>', 0)
+                    ->orWhereHas('allocations.attempt', fn ($attempt) => $attempt->whereIn('status', [
+                        PaymentAttemptStatus::Processing->value,
+                        PaymentAttemptStatus::Successful->value,
+                    ]));
+            })
+            ->exists()
+            || Payout::query()->whereHas('round.cycle', fn ($cycle) => $cycle->where('group_id', $group->id))->exists();
+    }
+
+    private function groupEditFieldLabel(string $field): string
+    {
+        return [
+            'group_name' => 'Jina la mchezo',
+            'member_slots' => 'Idadi ya washiriki',
+            'group_type' => 'Aina ya mchezo',
+            'leader_name' => 'Jina la Kijumbe',
+            'contribution_amount' => 'Kiasi cha mchango kwa jina',
+            'contribution_interval_days' => 'Muda kati ya michango',
+            'payout_interval_days' => 'Muda kati ya marejesho',
+            'cycle_starts_at' => 'Tarehe ya kuanza',
+            'kijumbe_fee' => 'Ada ya Kijumbe kwa jina',
+            'penalty_amount' => 'Faini ya kuchelewa',
+            'penalty_timing_hours' => 'Muda wa kuanza faini',
+        ][$field] ?? $field;
+    }
+
+    private function formatGroupEditValue(string $field, mixed $value): string
+    {
+        if ($field === 'cycle_starts_at' && $value) {
+            return Carbon::parse($value)->timezone('Africa/Dar_es_Salaam')->format('d/m/Y H:i').' EAT';
+        }
+        if (in_array($field, ['contribution_amount', 'kijumbe_fee', 'penalty_amount'], true)) {
+            return 'TZS '.number_format((int) $value);
+        }
+        if (in_array($field, ['contribution_interval_days', 'payout_interval_days'], true)) {
+            return (int) $value.' siku';
+        }
+        if ($field === 'penalty_timing_hours') {
+            return (int) $value.' saa';
+        }
+        if ($field === 'group_type') {
+            return Group::normalizeGroupType((string) $value) === Group::TYPE_PRODUCT ? 'Bidhaa' : 'Pesa';
+        }
+
+        return (string) $value;
     }
 
     private function looksLikeGroupCode(string $text): bool
