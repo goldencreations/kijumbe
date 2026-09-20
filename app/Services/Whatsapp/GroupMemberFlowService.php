@@ -203,7 +203,54 @@ class GroupMemberFlowService
             $slot->update(['payout_position' => $index + 1]);
         }
 
+        $this->normalizeSlotLabels($group);
+
         $group->update(['status' => 'active']);
+    }
+
+    /**
+     * Relabel each member's names in the order in which that member will receive.
+     * Slot IDs and payout positions never change.
+     */
+    public function normalizeSlotLabels(Group $group): int
+    {
+        return DB::transaction(function () use ($group): int {
+            $changed = 0;
+            $memberIds = GroupMemberSlot::query()
+                ->where('group_id', $group->id)
+                ->where('status', 'active')
+                ->distinct()
+                ->pluck('group_member_id');
+
+            foreach ($memberIds as $memberId) {
+                $slots = GroupMemberSlot::query()
+                    ->where('group_id', $group->id)
+                    ->where('group_member_id', $memberId)
+                    ->orderByRaw("CASE WHEN status = 'active' THEN 0 ELSE 1 END")
+                    ->orderByRaw('payout_position IS NULL')
+                    ->orderBy('payout_position')
+                    ->orderBy('id')
+                    ->lockForUpdate()
+                    ->get();
+
+                if ($slots->isEmpty() || $slots->values()->every(
+                    fn (GroupMemberSlot $slot, int $index): bool => (int) $slot->slot_number === $index + 1,
+                )) {
+                    continue;
+                }
+
+                $temporaryBase = max((int) $slots->max('slot_number'), $slots->count()) + $slots->count() + 1;
+                foreach ($slots->values() as $index => $slot) {
+                    $slot->update(['slot_number' => $temporaryBase + $index]);
+                }
+                foreach ($slots->values() as $index => $slot) {
+                    $slot->update(['slot_number' => $index + 1]);
+                    $changed++;
+                }
+            }
+
+            return $changed;
+        }, 3);
     }
 
     public function finalReport(Group $group): string
