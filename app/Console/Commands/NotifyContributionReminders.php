@@ -43,19 +43,22 @@ class NotifyContributionReminders extends Command
                             continue;
                         }
 
-                        $oldestRound = (int) $obligations->min('round_number');
                         $cacheKey = 'kijumbe:contribution-reminder:'.$user->id.':'.$group->id.':'.now()->toDateString();
                         if (! Cache::add($cacheKey, true, now()->endOfDay())) {
                             continue;
                         }
 
-                        $total = $obligations->sum(fn ($obligation): int => max(
-                            (int) $obligation->principal_amount
-                                + (int) $obligation->kijumbe_fee_amount
-                                + (int) $obligation->penalty_amount
-                                - (int) $obligation->paid_amount,
-                            0,
-                        ));
+                        $contributionDue = $obligations->sum(function ($obligation): int {
+                            $baseAmount = (int) $obligation->principal_amount + (int) $obligation->kijumbe_fee_amount;
+
+                            return max($baseAmount - min((int) $obligation->paid_amount, $baseAmount), 0);
+                        });
+                        $penaltyDue = $obligations->sum(function ($obligation): int {
+                            $baseAmount = (int) $obligation->principal_amount + (int) $obligation->kijumbe_fee_amount;
+                            $paidTowardPenalty = max((int) $obligation->paid_amount - $baseAmount, 0);
+
+                            return max((int) $obligation->penalty_amount - $paidTowardPenalty, 0);
+                        });
                         $groupName = $group->name ?: 'mchezo wako';
                         $dueToday = $obligations
                             ->filter(fn ($obligation): bool => $obligation->due_at?->isSameDay(now()))
@@ -63,12 +66,10 @@ class NotifyContributionReminders extends Command
                             ->first();
                         $deadline = $dueToday?->due_at?->timezone('Africa/Dar_es_Salaam')->format('H:i');
                         $message = "Ukumbusho wa mchango wa {$groupName}.\n"
-                            ."Mzunguko wa zamani zaidi ni {$oldestRound} na unadaiwa TZS ".number_format($total).".\n"
+                            .'Unadaiwa TZS '.number_format($contributionDue)
+                            .($penaltyDue > 0 ? ' na '.number_format($penaltyDue).' ya fine ya kuchelewa.' : '.')."\n"
                             .($deadline ? "Mchango wa leo unatakiwa kabla ya {$deadline} EAT.\n" : '')
-                            .'Tuma LIPA, chagua mchezo huu, thibitisha kiasi, kisha tuma namba ya simu ya kulipia. '
-                            ."Mchango wako ukichelewa, faini inaweza kuongezwa kulingana na kanuni za mchezo.\n\n"
-                            .'Kama leo ni siku ya marejesho, mpokeaji atalipwa baada ya michango inayohitajika kukamilika. '
-                            .'Tuma KATISHA kuacha hatua yoyote inayoendelea.';
+                            .'Tuma LIPA, chagua mchezo huu, thibitisha kiasi, kisha tuma namba ya simu ya kulipia.';
 
                         try {
                             $whatsapp->sendText($user, $message);

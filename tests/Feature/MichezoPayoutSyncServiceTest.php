@@ -99,15 +99,17 @@ class MichezoPayoutSyncServiceTest extends TestCase
             'contribution_amount' => 200,
             'currency' => 'TZS',
             'contribution_interval_days' => 1,
-            'member_slots' => 3,
-            'cycle_starts_at' => '2026-09-16 16:10:00',
+            'member_slots' => 2,
+            'cycle_starts_at' => '2026-09-18 00:00:00',
             'kijumbe_fee' => 50,
+            'penalty_amount' => 50,
+            'penalty_timing_hours' => 1,
         ]);
         $membership = GroupMember::create([
             'group_id' => $group->id,
             'user_id' => $user->id,
             'member_name' => $user->name,
-            'majina_count' => 3,
+            'majina_count' => 2,
             'role' => GroupRole::Member,
             'is_active' => true,
             'joined_at' => now(),
@@ -119,7 +121,7 @@ class MichezoPayoutSyncServiceTest extends TestCase
             'payout_position' => 1,
             'status' => 'active',
         ]);
-        foreach (range(2, 3) as $position) {
+        foreach ([2] as $position) {
             GroupMemberSlot::create([
                 'group_id' => $group->id,
                 'group_member_id' => $membership->id,
@@ -131,15 +133,6 @@ class MichezoPayoutSyncServiceTest extends TestCase
 
         $ledger = app(MemberPaymentLedgerService::class);
         $ledger->materialize($group->fresh());
-        MemberPaymentObligation::query()
-            ->where('group_id', $group->id)
-            ->where('round_number', '<', 3)
-            ->update([
-                'paid_amount' => 250,
-                'status' => 'paid',
-                'paid_at' => now(),
-            ]);
-
         Carbon::setTestNow(Carbon::parse('2026-09-18 09:00:00', 'Africa/Dar_es_Salaam'));
         $message = '';
         $whatsapp = Mockery::mock(MetaWhatsAppClient::class);
@@ -153,10 +146,14 @@ class MichezoPayoutSyncServiceTest extends TestCase
 
         $this->assertSame(0, Artisan::call('kijumbe:notify-contribution-reminders'));
         $this->assertStringContainsString('Sent 1 contribution reminder(s).', Artisan::output());
-        $this->assertStringContainsString('Mzunguko wa zamani zaidi ni 3', $message);
-        $this->assertStringContainsString('TZS 600', $message);
-        $this->assertStringContainsString('kabla ya 16:10 EAT', $message);
-        $this->assertSame(3, $slot->obligations()->count());
+        $this->assertSame(
+            "Ukumbusho wa mchango wa Reminder test.\n"
+                ."Unadaiwa TZS 400 na 100 ya fine ya kuchelewa.\n"
+                ."Mchango wa leo unatakiwa kabla ya 00:00 EAT.\n"
+                .'Tuma LIPA, chagua mchezo huu, thibitisha kiasi, kisha tuma namba ya simu ya kulipia.',
+            $message,
+        );
+        $this->assertSame(1, $slot->obligations()->count());
 
         $this->assertSame(0, Artisan::call('kijumbe:notify-contribution-reminders'));
         $this->assertStringContainsString('Sent 0 contribution reminder(s).', Artisan::output());
