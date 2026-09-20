@@ -22,6 +22,34 @@ class WhatsappGroupEditTest extends TestCase
 {
     use RefreshDatabase;
 
+    public function test_coordinator_can_start_editing_with_the_global_badili_taarifa_command(): void
+    {
+        [$group, $coordinator] = $this->startedGroup();
+        $messages = [];
+        $whatsapp = Mockery::mock(MetaWhatsAppClient::class);
+        $whatsapp->shouldReceive('sendText')->once()->andReturnUsing(
+            function (User $user, string $text) use (&$messages): WhatsappMessage {
+                $messages[] = $text;
+
+                return new WhatsappMessage;
+            },
+        );
+        $this->app->instance(MetaWhatsAppClient::class, $whatsapp);
+
+        app(WhatsappConversationService::class)->handle($coordinator, [
+            'id' => 'global-edit-1',
+            'text' => ['body' => 'BADILI TAARIFA'],
+        ]);
+
+        $this->assertStringContainsString("Mchezo: {$group->name}", $messages[0]);
+        $this->assertStringContainsString('11. Muda wa kuanza faini', $messages[0]);
+        $this->assertDatabaseHas('whatsapp_flow_sessions', [
+            'user_id' => $coordinator->id,
+            'flow_key' => 'group_action',
+            'step_key' => 'choose_edit_field',
+        ]);
+    }
+
     public function test_a_coordinator_can_change_penalty_timing_after_start_and_every_member_is_notified(): void
     {
         Carbon::setTestNow('2026-09-20 02:00:00');

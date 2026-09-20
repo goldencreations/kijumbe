@@ -3,6 +3,7 @@
 namespace App\Services\Whatsapp;
 
 use App\Enums\ContributionStatus;
+use App\Enums\CycleStatus;
 use App\Enums\PaymentAttemptStatus;
 use App\Models\Contribution;
 use App\Models\Group;
@@ -66,6 +67,12 @@ class WhatsappConversationService
         if (in_array($command, ['KATISHA', 'ACHA'], true)) {
             $this->flowSessions->cancelActive($user);
             $this->whatsapp->sendText($user, "Mchakato umefutwa.\n\n".$this->mainMenuMessage());
+
+            return;
+        }
+
+        if (in_array($command, ['BADILI TAARIFA', 'BADILI TAARIFA ZA MCHEZO'], true)) {
+            $this->startGroupEditFlow($user);
 
             return;
         }
@@ -456,6 +463,24 @@ class WhatsappConversationService
             return true;
         }
 
+        if ($session->step_key === 'choose_edit_group') {
+            $choice = (int) $text;
+            $selectedId = $payload['edit_group_ids'][$choice] ?? null;
+            $group = $selectedId ? $this->groupMembers->resolveGroup((string) $selectedId) : null;
+            if (! $group || ! $this->financialReports->isCoordinator($user, $group)) {
+                $this->whatsapp->sendText($user, 'Tuma namba sahihi ya mchezo unaotaka kubadili.');
+
+                return true;
+            }
+
+            $payload['group_id'] = $group->id;
+            $payload['group_code'] = $group->group_code ?: $group->id;
+            $this->flowSessions->advance($session, 'choose_edit_field', $payload);
+            $this->whatsapp->sendText($user, $this->groupEditMenu());
+
+            return true;
+        }
+
         if (! $group) {
             $this->flowSessions->complete($session);
 
@@ -765,6 +790,7 @@ class WhatsappConversationService
     {
         return "Karibu Kijumbe. Chagua huduma kwa kutuma moja ya maneno haya:\n\n"
             ."UNDA KIKUNDI - Unda mchezo mpya wa michango\n"
+            ."BADILI TAARIFA - Badili mchezo unaoratibu\n"
             ."LIPA - Lipa mchango wa mchezo mmoja au zaidi\n"
             ."POKEA - Pokea marejesho yako siku yako ikifika\n"
             ."NAMBA YA SIRI - Weka au badili namba ya siri ya kupokea fedha\n"
@@ -772,6 +798,44 @@ class WhatsappConversationService
             ."TAARIFA - Pata ripoti ya waliolipa na waliopokea kwenye michezo yako\n"
             ."KATISHA - Futa mchakato unaoendelea\n\n"
             .'Kwa kujiunga, kulipa, au kuona taarifa za mchezo, tuma msimbo wa mchezo.';
+    }
+
+    private function startGroupEditFlow(User $user): void
+    {
+        $groups = $this->financialReports->coordinatorGroups($user)
+            ->filter(fn (Group $group): bool => ! $group->cycles()->exists()
+                || $group->cycles()->where('status', '!=', CycleStatus::Completed->value)->exists())
+            ->values();
+        if ($groups->isEmpty()) {
+            $this->flowSessions->cancelActive($user);
+            $this->whatsapp->sendText($user, 'Huna mchezo unaoratibu unaoweza kubadilishwa.');
+
+            return;
+        }
+
+        if ($groups->count() === 1) {
+            $group = $groups->first();
+            $this->flowSessions->startGroupAction($user, 'choose_edit_field', [
+                'group_id' => $group->id,
+                'group_code' => $group->group_code ?: $group->id,
+            ]);
+            $this->whatsapp->sendText($user, "Mchezo: {$group->name}\n\n".$this->groupEditMenu());
+
+            return;
+        }
+
+        $groupIds = [];
+        $message = "Chagua mchezo unaotaka kubadili:\n";
+        foreach ($groups as $index => $group) {
+            $number = $index + 1;
+            $groupIds[$number] = $group->id;
+            $message .= "{$number}. {$group->name}\n";
+        }
+        $message .= 'Tuma namba ya mchezo.';
+        $this->flowSessions->startGroupAction($user, 'choose_edit_group', [
+            'edit_group_ids' => $groupIds,
+        ]);
+        $this->whatsapp->sendText($user, $message);
     }
 
     private function startFinancialReportFlow(User $user): void
