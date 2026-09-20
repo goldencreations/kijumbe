@@ -5,6 +5,7 @@ namespace App\Services;
 use App\Enums\ContributionStatus;
 use App\Enums\CycleMemberStatus;
 use App\Enums\CycleStatus;
+use App\Enums\GroupStatus;
 use App\Enums\PaymentAttemptStatus;
 use App\Enums\RoundStatus;
 use App\Models\Contribution;
@@ -236,6 +237,11 @@ class MichezoPayoutSyncService
                     : ($hasBlockedRound ? CycleStatus::Blocked : CycleStatus::Active),
                 'completed_at' => $completed ? ($cycle->completed_at ?: now()) : null,
             ]);
+            if ($completed && $group->status !== GroupStatus::Completed) {
+                $group->update(['status' => GroupStatus::Completed]);
+            } elseif (! $completed && $group->status === GroupStatus::Completed) {
+                $group->update(['status' => GroupStatus::Active]);
+            }
 
             return $synced;
         }, 3);

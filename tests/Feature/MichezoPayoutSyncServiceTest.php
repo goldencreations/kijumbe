@@ -245,6 +245,7 @@ class MichezoPayoutSyncServiceTest extends TestCase
 
         app(MichezoPayoutSyncService::class)->sync($group->fresh());
         $this->assertSame('completed', $cycle->fresh()->status->value);
+        $this->assertSame(GroupStatus::Completed, $group->fresh()->status);
         $this->assertNotNull($cycle->fresh()->completed_at);
         $this->assertFalse($slot->obligations()->where('round_number', 2)->exists());
         $this->assertTrue($obligation->fresh()->exists);

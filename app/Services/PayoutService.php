@@ -3,6 +3,7 @@
 namespace App\Services;
 
 use App\Enums\CycleStatus;
+use App\Enums\GroupStatus;
 use App\Enums\PayoutStatus;
 use App\Enums\RoundStatus;
 use App\Models\Payout;
@@ -149,6 +150,9 @@ class PayoutService
                     $round = Round::query()->lockForUpdate()->findOrFail($payout->round_id);
                     $round->update(['status' => RoundStatus::Blocked, 'paid_at' => null]);
                     $round->cycle->update(['status' => CycleStatus::Blocked, 'completed_at' => null]);
+                    if ($round->cycle->group->status === GroupStatus::Completed) {
+                        $round->cycle->group->update(['status' => GroupStatus::Active]);
+                    }
                 }
             }
 
@@ -174,6 +178,11 @@ class PayoutService
                 : CycleStatus::Completed,
             'completed_at' => $unfinished ? null : now(),
         ]);
+        if (! $unfinished) {
+            $cycle->group()->update(['status' => GroupStatus::Completed]);
+        } elseif ($cycle->group->status === GroupStatus::Completed) {
+            $cycle->group()->update(['status' => GroupStatus::Active]);
+        }
     }
 
     private function notifyOtherMembers(Payout $payout): void

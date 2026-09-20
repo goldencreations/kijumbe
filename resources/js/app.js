@@ -174,5 +174,5 @@ if (cashChart) {
 const groupChart = document.querySelector('[data-group-chart]');
 if (groupChart) {
     const groups = JSON.parse(groupChart.dataset.groupChart);
-    new Chart(groupChart, { type: 'doughnut', data: { labels: ['Active', 'Draft', 'Archived'], datasets: [{ data: [groups.active || 0, groups.draft || 0, groups.archived || 0], backgroundColor: ['#318e7b', '#d9ab58', '#c9cecf'], borderWidth: 3, hoverOffset: 4 }] }, options: { responsive: true, maintainAspectRatio: false, cutout: '76%', animation: reduceChartMotion ? false : { animateRotate: true, animateScale: true, duration: 1100, easing: 'easeOutQuart' }, plugins: { legend: { display: false } } } });
+    new Chart(groupChart, { type: 'doughnut', data: { labels: ['Active', 'Completed', 'Draft', 'Archived'], datasets: [{ data: [groups.active || 0, groups.completed || 0, groups.draft || 0, groups.archived || 0], backgroundColor: ['#318e7b', '#252b2d', '#d9ab58', '#c9cecf'], borderWidth: 3, hoverOffset: 4 }] }, options: { responsive: true, maintainAspectRatio: false, cutout: '76%', animation: reduceChartMotion ? false : { animateRotate: true, animateScale: true, duration: 1100, easing: 'easeOutQuart' }, plugins: { legend: { display: false } } } });
 }

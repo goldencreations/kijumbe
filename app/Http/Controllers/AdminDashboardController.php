@@ -63,7 +63,7 @@ class AdminDashboardController extends Controller
         }
 
         $definitions = [
-            'groups' => [Group::class, ['creator'], ['name', 'id', 'created_by_phone'], ['draft', 'active', 'archived']],
+            'groups' => [Group::class, ['creator'], ['name', 'id', 'created_by_phone'], ['draft', 'active', 'completed', 'archived']],
             'members' => [User::class, ['groupMemberships.group'], ['name', 'email', 'phone'], []],
             'payments' => [PaymentAttempt::class, ['initiator', 'contribution.round.cycle.group', 'contribution.cycleMember.groupMember.user', 'allocations.obligation.group', 'allocations.obligation.slot.groupMember.user'], ['order_reference', 'provider_reference', 'phone_e164'], array_map(fn (PaymentAttemptStatus $status): string => $status->value, PaymentAttemptStatus::cases())],
             'payouts' => [Payout::class, ['recipient.groupMember.user', 'recipientUser', 'round.cycle.group', 'cycle.group', 'requester', 'approver'], ['order_reference', 'payment_reference', 'destination_phone'], ['pending', 'approved', 'processing', 'paid', 'failed', 'refunded', 'reversed']],
