@@ -15,7 +15,8 @@ class Round extends Model
 
     protected $fillable = [
         'cycle_id', 'number', 'recipient_cycle_member_id', 'due_at', 'grace_ends_at',
-        'required_amount', 'collected_amount', 'payout_amount', 'status', 'paid_at',
+        'required_amount', 'collected_amount', 'payout_amount', 'gross_payout_amount',
+        'kijumbe_fee_amount', 'platform_fee_amount', 'coordinator_fee_amount', 'status', 'paid_at',
     ];
 
     protected function casts(): array
@@ -29,6 +30,10 @@ class Round extends Model
             'required_amount' => 'integer',
             'collected_amount' => 'integer',
             'payout_amount' => 'integer',
+            'gross_payout_amount' => 'integer',
+            'kijumbe_fee_amount' => 'integer',
+            'platform_fee_amount' => 'integer',
+            'coordinator_fee_amount' => 'integer',
         ];
     }
 

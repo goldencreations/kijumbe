@@ -248,7 +248,13 @@ class DashboardController extends Controller
             ->where('payouts.status', PayoutStatus::Paid->value)
             ->whereIn('cycles.group_id', $groupIds)
             ->groupBy('cycles.group_id')
-            ->selectRaw('cycles.group_id, COUNT(payouts.id) AS paid_payouts, COALESCE(SUM(payouts.amount), 0) AS paid_payouts_amount')
+            ->selectRaw(
+                'cycles.group_id, COUNT(payouts.id) AS paid_payouts, '
+                .'COALESCE(SUM(payouts.amount), 0) AS paid_payouts_amount, '
+                .'COALESCE(SUM(payouts.kijumbe_fee_amount), 0) AS deducted_fees, '
+                .'COALESCE(SUM(payouts.platform_fee_amount), 0) AS deducted_platform_fees, '
+                .'COALESCE(SUM(payouts.coordinator_fee_amount), 0) AS deducted_coordinator_fees'
+            )
             ->get()
             ->keyBy('group_id');
 
@@ -274,9 +280,9 @@ class DashboardController extends Controller
                 'collected_amount' => (int) ($money?->collected_amount ?? 0),
                 'expected_amount' => (int) ($expected[$group->id] ?? 0),
                 'principal_collected' => (int) ($money?->principal_collected ?? 0),
-                'fees_collected' => (int) ($money?->fees_collected ?? 0),
-                'platform_fees_collected' => (int) ($money?->platform_fees_collected ?? 0),
-                'coordinator_fees_collected' => (int) ($money?->coordinator_fees_collected ?? 0),
+                'fees_collected' => (int) ($money?->fees_collected ?? 0) + (int) ($paid?->deducted_fees ?? 0),
+                'platform_fees_collected' => (int) ($money?->platform_fees_collected ?? 0) + (int) ($paid?->deducted_platform_fees ?? 0),
+                'coordinator_fees_collected' => (int) ($money?->coordinator_fees_collected ?? 0) + (int) ($paid?->deducted_coordinator_fees ?? 0),
                 'penalties_collected' => (int) ($money?->penalties_collected ?? 0),
                 'paid_payouts' => (int) ($paid?->paid_payouts ?? 0),
                 'paid_payouts_amount' => (int) ($paid?->paid_payouts_amount ?? 0),

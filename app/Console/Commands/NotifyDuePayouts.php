@@ -63,8 +63,14 @@ class NotifyDuePayouts extends Command
                     $payout = Payout::firstOrCreate(
                         ['round_id' => $round->id],
                         [
+                            'purpose' => Payout::PURPOSE_MEMBER,
                             'recipient_cycle_member_id' => $round->recipient_cycle_member_id,
+                            'recipient_user_id' => $user->id,
                             'amount' => (int) $round->payout_amount,
+                            'gross_amount' => (int) $round->gross_payout_amount,
+                            'kijumbe_fee_amount' => (int) $round->kijumbe_fee_amount,
+                            'platform_fee_amount' => (int) $round->platform_fee_amount,
+                            'coordinator_fee_amount' => (int) $round->coordinator_fee_amount,
                             'status' => PayoutStatus::Pending,
                             'destination_phone' => $phones->toTanzanianWaId($user->whatsapp_wa_id ?: $user->phone),
                             'provider' => (string) config('services.payments.driver'),
@@ -78,7 +84,14 @@ class NotifyDuePayouts extends Command
                     }
 
                     $groupName = $round->cycle?->group?->name ?: 'kikundi chako';
-                    $whatsapp->sendText($user, "Siku yako ya kupokea fedha katika {$groupName} imefika. Kiasi cha msingi ni TZS ".number_format((int) $payout->amount).'. Tuma POKEA kuanza uthibitisho. Utahitaji namba ya simu ya kupokea, msimbo wa SMS, na namba yako ya siri.');
+                    $whatsapp->sendText(
+                        $user,
+                        "Siku yako ya kupokea fedha katika {$groupName} imefika.\n"
+                            .'Jumla ya mchezo: TZS '.number_format((int) $payout->gross_amount)."\n"
+                            .'Ada ya Kijumbe iliyokatwa: TZS '.number_format((int) $payout->kijumbe_fee_amount)."\n"
+                            .'Utapokea: TZS '.number_format((int) $payout->amount)."\n\n"
+                            .'Tuma POKEA kuanza uthibitisho. Utahitaji namba ya simu ya kupokea, msimbo wa SMS, na namba yako ya siri.',
+                    );
                     $created++;
                 }
             });

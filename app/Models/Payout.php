@@ -25,7 +25,8 @@ class Payout extends Model
     }
 
     protected $fillable = [
-        'purpose', 'round_id', 'cycle_id', 'recipient_cycle_member_id', 'recipient_user_id', 'amount', 'status',
+        'purpose', 'round_id', 'cycle_id', 'recipient_cycle_member_id', 'recipient_user_id', 'amount',
+        'gross_amount', 'kijumbe_fee_amount', 'platform_fee_amount', 'coordinator_fee_amount', 'status',
         'payment_reference', 'destination_phone', 'provider', 'order_reference',
         'provider_reference', 'idempotency_key', 'processed_by', 'requested_by', 'approved_by',
         'processed_at', 'approved_at', 'initiated_at', 'ready_notified_at', 'notes', 'response_payload', 'failure_reason',
@@ -36,6 +37,10 @@ class Payout extends Model
         return [
             'status' => PayoutStatus::class,
             'amount' => 'integer',
+            'gross_amount' => 'integer',
+            'kijumbe_fee_amount' => 'integer',
+            'platform_fee_amount' => 'integer',
+            'coordinator_fee_amount' => 'integer',
             'processed_at' => 'datetime',
             'approved_at' => 'datetime',
             'initiated_at' => 'datetime',

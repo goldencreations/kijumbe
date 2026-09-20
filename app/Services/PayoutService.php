@@ -38,9 +38,15 @@ class PayoutService
             }
 
             $payout = Payout::create([
+                'purpose' => Payout::PURPOSE_MEMBER,
                 'round_id' => $round->id,
                 'recipient_cycle_member_id' => $round->recipient_cycle_member_id,
+                'recipient_user_id' => $round->recipient?->groupMember?->user_id,
                 'amount' => $round->payout_amount,
+                'gross_amount' => $round->gross_payout_amount,
+                'kijumbe_fee_amount' => $round->kijumbe_fee_amount,
+                'platform_fee_amount' => $round->platform_fee_amount,
+                'coordinator_fee_amount' => $round->coordinator_fee_amount,
                 'status' => PayoutStatus::Paid,
                 'payment_reference' => $data['payment_reference'],
                 'processed_by' => $actor->id,
@@ -182,7 +188,9 @@ class PayoutService
         $message = "MAREJESHO YAMELIPWA\n"
             ."Mchezo: {$group->name}\n"
             ."Mpokeaji: {$recipient->name}\n"
-            .'Kiasi: TZS '.number_format((int) $payout->amount)."\n"
+            .'Jumla ya mchezo: TZS '.number_format((int) $payout->gross_amount)."\n"
+            .'Ada ya Kijumbe: TZS '.number_format((int) $payout->kijumbe_fee_amount)."\n"
+            .'Kiasi alichopokea: TZS '.number_format((int) $payout->amount)."\n"
             .'Mzunguko: '.($payout->round?->number ?? '-')."\n"
             .'Muda: '.($payout->processed_at ?: now())->format('d/m/Y H:i')." EAT\n\n"
             .'Tuma TAARIFA kuona hali ya mchezo wako.';

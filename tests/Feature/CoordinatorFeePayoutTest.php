@@ -15,6 +15,7 @@ use App\Models\MemberPaymentObligation;
 use App\Models\PaymentAllocation;
 use App\Models\PaymentAttempt;
 use App\Models\Payout;
+use App\Models\Round;
 use App\Models\User;
 use App\Models\WhatsappMessage;
 use App\Services\CoordinatorFeePayoutService;
@@ -52,14 +53,14 @@ class CoordinatorFeePayoutTest extends TestCase
         $this->assertNotNull($first);
         $this->assertSame($first->id, $second?->id);
         $this->assertSame(Payout::PURPOSE_COORDINATOR_FEE, $first->purpose);
-        $this->assertSame(140, $first->amount);
+        $this->assertSame(210, $first->amount);
         $this->assertSame($coordinator->id, $first->recipient_user_id);
         $this->assertSame(PayoutStatus::Pending, $first->status);
         $this->assertNotNull($first->fresh()->ready_notified_at);
         $this->assertStringContainsString('ADA YAKO YA KIJUMBE IKO TAYARI', $readyMessage);
-        $this->assertStringContainsString('TZS 140', $readyMessage);
+        $this->assertStringContainsString('TZS 210', $readyMessage);
         $this->assertStringContainsString('POKEA ADA', $readyMessage);
-        $this->assertDatabaseCount('payouts', 1);
+        $this->assertDatabaseCount('payouts', 2);
 
         $flowMessage = '';
         $flowWhatsapp = Mockery::mock(MetaWhatsAppClient::class);
@@ -74,7 +75,7 @@ class CoordinatorFeePayoutTest extends TestCase
             'text' => ['body' => 'POKEA ADA'],
         ]);
 
-        $this->assertStringContainsString('ada yako ya Kijumbe ya TZS 140', $flowMessage);
+        $this->assertStringContainsString('ada yako ya Kijumbe ya TZS 210', $flowMessage);
         $this->assertDatabaseHas('whatsapp_flow_sessions', [
             'user_id' => $coordinator->id,
             'flow_key' => 'payout',
@@ -114,7 +115,7 @@ class CoordinatorFeePayoutTest extends TestCase
         $this->assertNotNull($cycle->fresh()->completed_at);
         $this->assertStringContainsString('ADA YA KIJUMBE IMELIPWA', $paidMessage);
         $this->assertStringContainsString('Kijumbe: Derick', $paidMessage);
-        $this->assertStringContainsString('TZS 140', $paidMessage);
+        $this->assertStringContainsString('TZS 210', $paidMessage);
         Carbon::setTestNow();
     }
 
@@ -230,6 +231,35 @@ class CoordinatorFeePayoutTest extends TestCase
                 ]);
             }
         }
+
+        $round = Round::create([
+            'cycle_id' => $cycle->id,
+            'number' => 1,
+            'recipient_cycle_member_id' => $cycle->members()->orderBy('payout_position')->firstOrFail()->id,
+            'due_at' => now()->subDay(),
+            'grace_ends_at' => now()->subDay()->addHours(2),
+            'required_amount' => 400,
+            'collected_amount' => 400,
+            'payout_amount' => 300,
+            'gross_payout_amount' => 400,
+            'kijumbe_fee_amount' => 100,
+            'platform_fee_amount' => 30,
+            'coordinator_fee_amount' => 70,
+            'status' => 'paid',
+            'paid_at' => now(),
+        ]);
+        Payout::create([
+            'purpose' => Payout::PURPOSE_MEMBER,
+            'round_id' => $round->id,
+            'recipient_cycle_member_id' => $round->recipient_cycle_member_id,
+            'amount' => 300,
+            'gross_amount' => 400,
+            'kijumbe_fee_amount' => 100,
+            'platform_fee_amount' => 30,
+            'coordinator_fee_amount' => 70,
+            'status' => PayoutStatus::Paid,
+            'processed_at' => now(),
+        ]);
 
         return [$cycle, $coordinator];
     }

@@ -284,7 +284,7 @@ class WhatsappConversationService
             'contribution_interval_days' => '6/11. Mchango wa kiasi hicho ulipwe kila baada ya siku ngapi? Mfano 1 ni kila siku, 5 ni kila baada ya siku 5.',
             'payout_interval_days' => '7/11. Mwanachama atapokea marejesho kila baada ya siku ngapi? Mfano 3 au 10.',
             'cycle_starts_at' => '8/11. Kikundi kitaanza tarehe gani? Tuma kama 2026-09-15 au 2026-09-15 08:00.',
-            'kijumbe_fee' => '9/11. Ada ya Kijumbe ni kiasi gani kwa kila mchango? Tuma 0 kama hakuna.',
+            'kijumbe_fee' => '9/11. Ada ya Kijumbe ni kiasi gani kwa kila jina? Ada hii itakatwa kwenye marejesho, si kuongezwa kwenye mchango. Tuma 0 kama hakuna.',
             'penalty_amount' => '10/11. Faini ya kuchelewa ni kiasi gani? Tuma 0 kama hakuna.',
             'penalty_timing_hours' => '11/11. Faini itaanza baada ya saa ngapi tangu muda wa malipo upite? Tuma 0 kama hakuna.',
             default => null,
@@ -308,7 +308,7 @@ class WhatsappConversationService
         $summary .= '7. Mchango kila baada ya siku: '.($payload['contribution_interval_days'] ?? '-')."\n";
         $summary .= '8. Marejesho kila baada ya siku: '.($payload['payout_interval_days'] ?? '-')."\n";
         $summary .= '9. Tarehe ya kuanza: '.($payload['cycle_starts_at'] ?? '-')."\n";
-        $summary .= '10. Ada ya Kijumbe: TZS '.number_format((int) ($payload['kijumbe_fee'] ?? 0))."\n";
+        $summary .= '10. Ada ya Kijumbe kwa kila jina (itakatwa kwenye marejesho): TZS '.number_format((int) ($payload['kijumbe_fee'] ?? 0))."\n";
         $summary .= '11. Faini: TZS '.number_format((int) ($payload['penalty_amount'] ?? 0))."\n";
         $summary .= '12. Muda wa faini: '.((int) ($payload['penalty_timing_hours'] ?? 0))." saa\n";
         $summary .= "13. Namba ya kikundi: itatengenezwa baada ya kuthibitisha\n\n";
@@ -946,7 +946,7 @@ class WhatsappConversationService
             'contribution_interval_days' => 'Tuma baada ya siku ngapi mchango ulipwe.',
             'payout_interval_days' => 'Tuma baada ya siku ngapi mwanachama apokee marejesho.',
             'cycle_starts_at' => 'Tuma tarehe mpya ya kuanza, mfano 2026-09-20 08:00.',
-            'kijumbe_fee' => 'Tuma ada mpya ya Kijumbe, au 0 kama hakuna.',
+            'kijumbe_fee' => 'Tuma ada mpya ya Kijumbe kwa kila jina. Ada hii itakatwa kwenye marejesho, au tuma 0 kama hakuna.',
             'penalty_amount' => 'Tuma faini mpya, au 0 kama hakuna.',
             'penalty_timing_hours' => 'Tuma baada ya masaa mangapi faini ianze, au 0 kama hakuna.',
             default => 'Tuma thamani mpya.',

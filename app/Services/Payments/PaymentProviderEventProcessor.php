@@ -182,7 +182,7 @@ class PaymentProviderEventProcessor
             .'Mwanachama: '.($names !== '' ? $names : 'Mwanachama')."\n"
             .'Kiasi: TZS '.number_format((int) $attempt->amount)."\n"
             ."Amelipiwa na: {$payer} ({$this->phones->forDisplay($attempt->phone_e164)})\n"
-            .'Sehemu ya ada ya Kijumbe: TZS '.number_format((int) $allocations->sum('coordinator_fee_amount'))."\n"
+            .'Ada ya Kijumbe haijaongezwa kwenye mchango; itakatwa kwenye marejesho ya mpokeaji.'."\n"
             .'Muda: '.($attempt->completed_at ?: now())->format('d/m/Y H:i')." EAT\n\n"
             .'Tuma TAARIFA kupata ripoti kamili.';
 

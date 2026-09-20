@@ -213,9 +213,7 @@ class MemberPaymentLedgerService
             $rounds = min($rounds, $configuredRoundLimit, $activeSlots->count());
         }
         $principal = (int) ($group->contribution_amount ?? $group->amount_per_day ?? 0);
-        $fee = (int) ($group->kijumbe_fee ?? 0);
         $platformPercent = (int) ($group->platform_fee_percent ?? config('kijumbe.platform_fee_percent', 30));
-        [$platformFee, $coordinatorFee] = Group::splitKijumbeFee($fee, $platformPercent);
         $penalty = (int) ($group->penalty_amount ?? 0);
         $penaltyHours = (int) ($group->penalty_timing_hours ?? $group->grace_period_hours ?? 0);
 
@@ -234,14 +232,25 @@ class MemberPaymentLedgerService
                 $wasPaidLate = $obligation->paid_at?->greaterThan($penaltyDeadline) ?? false;
                 $isStillLate = ! $obligation->paid_at && now()->greaterThan($penaltyDeadline);
                 $latePenalty = $penalty > 0 && ($wasPaidLate || $isStillLate) ? $penalty : 0;
-                $totalDue = $principal + $fee + $latePenalty;
                 $paidAmount = (int) ($obligation->paid_amount ?? 0);
+                $hasCommittedLegacyFee = $obligation->exists
+                    && (int) $obligation->kijumbe_fee_amount > 0
+                    && ($paidAmount > 0 || $obligation->allocations()
+                        ->whereHas('attempt', fn ($query) => $query->whereIn('status', [
+                            PaymentAttemptStatus::Created->value,
+                            PaymentAttemptStatus::Processing->value,
+                            PaymentAttemptStatus::Successful->value,
+                        ]))
+                        ->exists());
+                $legacyFee = $hasCommittedLegacyFee ? (int) $obligation->kijumbe_fee_amount : 0;
+                [$platformFee, $coordinatorFee] = Group::splitKijumbeFee($legacyFee, $platformPercent);
+                $totalDue = $principal + $legacyFee + $latePenalty;
 
                 $obligation->fill([
                     'group_id' => $group->id,
                     'due_at' => $dueAt,
                     'principal_amount' => $principal,
-                    'kijumbe_fee_amount' => $fee,
+                    'kijumbe_fee_amount' => $legacyFee,
                     'platform_fee_percent' => $platformPercent,
                     'platform_fee_amount' => $platformFee,
                     'coordinator_fee_amount' => $coordinatorFee,

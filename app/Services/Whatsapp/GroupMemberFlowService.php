@@ -229,7 +229,7 @@ class GroupMemberFlowService
             $lines[] = $slot->payout_position.'. '.$name.' - Jina '.$slot->slot_number;
         }
 
-        $lines[] = 'Lipa kiasi cha jina lako pamoja na ada ya Kijumbe na faini yoyote inayotumika kabla ya muda wa malipo kuisha.';
+        $lines[] = 'Lipa mchango wa jina lako na faini yoyote inayotumika kabla ya muda kuisha. Ada ya Kijumbe haitalipwa juu ya mchango; itakatwa kwenye marejesho ya mpokeaji.';
 
         return implode("\n", $lines);
     }
@@ -273,7 +273,7 @@ class GroupMemberFlowService
         }
 
         $lines[] = 'Mpangilio wa kupokea: '.($this->payoutOrderName((string) ($group->payout_order ?: 'fixed')));
-        $lines[] = 'Ada ya Kijumbe: TZS '.number_format((int) ($group->kijumbe_fee ?: $group->platform_fee_amount ?? 0));
+        $lines[] = 'Ada ya Kijumbe kwa kila jina (itakatwa kwenye marejesho): TZS '.number_format((int) ($group->kijumbe_fee ?: $group->platform_fee_amount ?? 0));
         $lines[] = 'Faini: TZS '.number_format((int) ($group->penalty_amount ?? 0));
         $lines[] = 'Muda wa kuanza faini: masaa '.((int) ($group->penalty_timing_hours ?: $group->grace_period_hours ?? 0));
 

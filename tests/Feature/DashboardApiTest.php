@@ -116,14 +116,28 @@ class DashboardApiTest extends TestCase
             $attempt = $ledger->initiate(
                 $user,
                 $group->fresh(),
-                1200,
+                1100,
                 $user->phone ?: '255700000001',
                 'dashboard-total-payment-'.$index,
             );
-            $ledger->confirmFromProvider($attempt, 1200, 'DASHBOARD-PAID-'.$index, [
-                'data' => ['id' => 'dashboard-payment-'.$index, 'fee' => 0, 'net' => 1200],
+            $ledger->confirmFromProvider($attempt, 1100, 'DASHBOARD-PAID-'.$index, [
+                'data' => ['id' => 'dashboard-payment-'.$index, 'fee' => 0, 'net' => 1100],
             ]);
         }
+
+        $round = $group->cycles()->firstOrFail()->rounds()->firstOrFail();
+        Payout::create([
+            'purpose' => Payout::PURPOSE_MEMBER,
+            'round_id' => $round->id,
+            'recipient_cycle_member_id' => $round->recipient_cycle_member_id,
+            'amount' => 1800,
+            'gross_amount' => 2000,
+            'kijumbe_fee_amount' => 200,
+            'platform_fee_amount' => 60,
+            'coordinator_fee_amount' => 140,
+            'status' => 'paid',
+            'processed_at' => now(),
+        ]);
 
         $emptyGroup = Group::create([
             'name' => 'Empty Dashboard Group',
@@ -133,8 +147,8 @@ class DashboardApiTest extends TestCase
 
         $this->getJson('/api/v1/dashboard')
             ->assertOk()
-            ->assertJsonPath('data.summary.total_amount', 2400)
-            ->assertJsonPath('data.summary.collected_amount', 2400)
+            ->assertJsonPath('data.summary.total_amount', 2200)
+            ->assertJsonPath('data.summary.collected_amount', 2200)
             ->assertJsonPath('data.summary.principal_collected', 2000)
             ->assertJsonPath('data.summary.fees_collected', 200)
             ->assertJsonPath('data.summary.platform_fees_collected', 60)
@@ -145,7 +159,7 @@ class DashboardApiTest extends TestCase
         $this->getJson('/api/v1/dashboard?group_id='.$group->id)
             ->assertOk()
             ->assertJsonPath('data.selected_group_id', $group->id)
-            ->assertJsonPath('data.summary.total_amount', 2400)
+            ->assertJsonPath('data.summary.total_amount', 2200)
             ->assertJsonCount(1, 'data.group_breakdown')
             ->assertJsonPath('data.group_breakdown.0.group_id', $group->id)
             ->assertJsonPath('data.group_breakdown.0.penalties_collected', 200);

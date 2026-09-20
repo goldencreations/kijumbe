@@ -67,9 +67,9 @@ class WhatsappFinancialReportingTest extends TestCase
     {
         [$group, $coordinator, $member] = $this->groupWithCoordinatorAndMember();
         $ledger = app(MemberPaymentLedgerService::class);
-        $attempt = $ledger->initiate($member, $group, 250, '0748281701', 'report-payment-001');
-        $ledger->confirmFromProvider($attempt, 250, 'REPORT-PAID-001', [
-            'data' => ['id' => 'report-payment', 'fee' => 0, 'net' => 250],
+        $attempt = $ledger->initiate($member, $group, 200, '0748281701', 'report-payment-001');
+        $ledger->confirmFromProvider($attempt, 200, 'REPORT-PAID-001', [
+            'data' => ['id' => 'report-payment', 'fee' => 0, 'net' => 200],
         ]);
 
         $messages = [];
@@ -102,9 +102,9 @@ class WhatsappFinancialReportingTest extends TestCase
         $this->assertStringContainsString('3. Ripoti kamili', $messages[1]);
         $report = implode("\n", $messages);
         $this->assertStringContainsString('TAARIFA YA Office Report Group', $report);
-        $this->assertStringContainsString('Office Member (Jina 1): AMELIPA TZS 250/250', $report);
-        $this->assertStringContainsString('Ada ya platform iliyokusanywa: TZS 15', $report);
-        $this->assertStringContainsString('Ada ya Kijumbe iliyokusanywa: TZS 35', $report);
+        $this->assertStringContainsString('Office Member (Jina 1): AMELIPA TZS 200/200', $report);
+        $this->assertStringContainsString('Ada ya platform iliyokusanywa: TZS 0', $report);
+        $this->assertStringContainsString('Ada ya Kijumbe iliyokusanywa: TZS 0', $report);
         $this->assertStringContainsString('MAREJESHO:', $report);
     }
 
@@ -112,7 +112,7 @@ class WhatsappFinancialReportingTest extends TestCase
     {
         [$group, $coordinator, $member] = $this->groupWithCoordinatorAndMember();
         $attempt = app(MemberPaymentLedgerService::class)
-            ->initiate($member, $group, 250, '0748281701', 'report-payment-002');
+            ->initiate($member, $group, 200, '0748281701', 'report-payment-002');
 
         $messages = [];
         $whatsapp = Mockery::mock(MetaWhatsAppClient::class);
@@ -133,7 +133,7 @@ class WhatsappFinancialReportingTest extends TestCase
                 'data' => [
                     'id' => 'report-payment-002',
                     'paymentReference' => 'REPORT-PAID-002',
-                    'collectedAmount' => 250,
+                    'collectedAmount' => 200,
                     'collectedCurrency' => 'TZS',
                 ],
             ],
@@ -143,8 +143,8 @@ class WhatsappFinancialReportingTest extends TestCase
         $coordinatorMessage = implode("\n", $messages[$coordinator->id] ?? []);
         $this->assertStringContainsString('MALIPO YAMEPOKELEWA', $coordinatorMessage);
         $this->assertStringContainsString('Mwanachama: Office Member', $coordinatorMessage);
-        $this->assertStringContainsString('Kiasi: TZS 250', $coordinatorMessage);
-        $this->assertStringContainsString('Sehemu ya ada ya Kijumbe: TZS 35', $coordinatorMessage);
+        $this->assertStringContainsString('Kiasi: TZS 200', $coordinatorMessage);
+        $this->assertStringContainsString('Ada ya Kijumbe haijaongezwa kwenye mchango', $coordinatorMessage);
         $this->assertStringContainsString('Tuma TAARIFA', $coordinatorMessage);
         $this->assertNotEmpty($messages[$member->id] ?? []);
     }
@@ -160,7 +160,7 @@ class WhatsappFinancialReportingTest extends TestCase
             'whatsapp_opted_in_at' => now(),
         ]);
         $attempt = app(MemberPaymentLedgerService::class)
-            ->initiate($payer, $group, 250, '0713456789', 'report-payment-for-other-001', $beneficiary);
+            ->initiate($payer, $group, 200, '0713456789', 'report-payment-for-other-001', $beneficiary);
 
         $messages = [];
         $whatsapp = Mockery::mock(MetaWhatsAppClient::class);
@@ -181,7 +181,7 @@ class WhatsappFinancialReportingTest extends TestCase
                 'data' => [
                     'id' => 'report-payment-for-other-001',
                     'paymentReference' => 'REPORT-PAID-FOR-OTHER-001',
-                    'collectedAmount' => 250,
+                    'collectedAmount' => 200,
                     'collectedCurrency' => 'TZS',
                 ],
             ],
@@ -191,7 +191,7 @@ class WhatsappFinancialReportingTest extends TestCase
         $beneficiaryMessage = implode("\n", $messages[$beneficiary->id] ?? []);
         $this->assertStringContainsString('MALIPO YAKO YAMEPOKELEWA', $beneficiaryMessage);
         $this->assertStringContainsString('Mchezo: Office Report Group', $beneficiaryMessage);
-        $this->assertStringContainsString('Kiasi: TZS 250', $beneficiaryMessage);
+        $this->assertStringContainsString('Kiasi: TZS 200', $beneficiaryMessage);
         $this->assertStringContainsString('Umelipiwa na namba: 0713456789', $beneficiaryMessage);
         $this->assertNotEmpty($messages[$payer->id] ?? []);
         $this->assertNotEmpty($messages[$coordinator->id] ?? []);
@@ -201,9 +201,9 @@ class WhatsappFinancialReportingTest extends TestCase
     {
         [$group, $coordinator, $member] = $this->groupWithCoordinatorAndMember();
         $ledger = app(MemberPaymentLedgerService::class);
-        $attempt = $ledger->initiate($member, $group, 250, '0748281701', 'member-report-payment-001');
-        $ledger->confirmFromProvider($attempt, 250, 'MEMBER-REPORT-PAID-001', [
-            'data' => ['id' => 'member-report-payment', 'fee' => 0, 'net' => 250],
+        $attempt = $ledger->initiate($member, $group, 200, '0748281701', 'member-report-payment-001');
+        $ledger->confirmFromProvider($attempt, 200, 'MEMBER-REPORT-PAID-001', [
+            'data' => ['id' => 'member-report-payment', 'fee' => 0, 'net' => 200],
         ]);
 
         $round = Round::query()
@@ -212,7 +212,11 @@ class WhatsappFinancialReportingTest extends TestCase
         Payout::create([
             'round_id' => $round->id,
             'recipient_cycle_member_id' => $round->recipient_cycle_member_id,
-            'amount' => 400,
+            'amount' => 300,
+            'gross_amount' => 400,
+            'kijumbe_fee_amount' => 100,
+            'platform_fee_amount' => 30,
+            'coordinator_fee_amount' => 70,
             'status' => PayoutStatus::Paid,
             'payment_reference' => 'MEMBER-REPORT-PAYOUT-001',
             'processed_at' => now(),
@@ -252,9 +256,9 @@ class WhatsappFinancialReportingTest extends TestCase
 
         $report = implode("\n", $messages);
         $this->assertStringContainsString('TAARIFA YA Office Report Group', $report);
-        $this->assertStringContainsString('Office Member (Jina 1): AMELIPA TZS 250/250', $report);
+        $this->assertStringContainsString('Office Member (Jina 1): AMELIPA TZS 200/200', $report);
         $this->assertStringContainsString('Office Coordinator (Jina 1): HAJALIPA', $report);
-        $this->assertStringContainsString('Office Coordinator AMEPOKEA TZS 400', $report);
+        $this->assertStringContainsString('Office Coordinator AMEPOKEA TZS 300', $report);
         $this->assertStringNotContainsString('Ada ya platform iliyokusanywa', $report);
         $this->assertStringNotContainsString('Ada ya Kijumbe iliyokusanywa', $report);
         $this->assertStringNotContainsString('Private Outsider Group', $report);
@@ -264,9 +268,9 @@ class WhatsappFinancialReportingTest extends TestCase
     {
         [$group, $coordinator, $member] = $this->groupWithCoordinatorAndMember();
         $ledger = app(MemberPaymentLedgerService::class);
-        $attempt = $ledger->initiate($member, $group, 250, '0748281701', 'payout-notification-payment');
-        $ledger->confirmFromProvider($attempt, 250, 'PAYOUT-NOTIFICATION-PAID', [
-            'data' => ['id' => 'payout-notification-payment', 'fee' => 0, 'net' => 250],
+        $attempt = $ledger->initiate($member, $group, 200, '0748281701', 'payout-notification-payment');
+        $ledger->confirmFromProvider($attempt, 200, 'PAYOUT-NOTIFICATION-PAID', [
+            'data' => ['id' => 'payout-notification-payment', 'fee' => 0, 'net' => 200],
         ]);
 
         $round = Round::query()
@@ -278,7 +282,11 @@ class WhatsappFinancialReportingTest extends TestCase
         $payout = Payout::create([
             'round_id' => $round->id,
             'recipient_cycle_member_id' => $round->recipient_cycle_member_id,
-            'amount' => 400,
+            'amount' => 300,
+            'gross_amount' => 400,
+            'kijumbe_fee_amount' => 100,
+            'platform_fee_amount' => 30,
+            'coordinator_fee_amount' => 70,
             'status' => PayoutStatus::Processing,
             'order_reference' => 'PAYOUT-NOTIFICATION-001',
         ]);
@@ -304,7 +312,7 @@ class WhatsappFinancialReportingTest extends TestCase
         $this->assertStringContainsString('MAREJESHO YAMELIPWA', $message);
         $this->assertStringContainsString("Mchezo: {$group->name}", $message);
         $this->assertStringContainsString("Mpokeaji: {$recipient->name}", $message);
-        $this->assertStringContainsString('Kiasi: TZS 400', $message);
+        $this->assertStringContainsString('Kiasi alichopokea: TZS 300', $message);
     }
 
     /** @return array{Group, User, User} */

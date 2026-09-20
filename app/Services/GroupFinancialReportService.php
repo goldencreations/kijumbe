@@ -138,11 +138,24 @@ class GroupFinancialReportService
                 .'COALESCE(SUM(payment_allocations.platform_fee_amount), 0) AS platform_fee, '
                 .'COALESCE(SUM(payment_allocations.coordinator_fee_amount), 0) AS coordinator_fee'
             )->first();
+            $deducted = Payout::query()
+                ->where('purpose', Payout::PURPOSE_MEMBER)
+                ->where('status', 'paid')
+                ->whereHas('round.cycle', fn ($query) => $query->where('group_id', $group->id))
+                ->selectRaw(
+                    'COALESCE(SUM(platform_fee_amount), 0) AS platform_fee, '
+                    .'COALESCE(SUM(coordinator_fee_amount), 0) AS coordinator_fee'
+                )
+                ->first();
             $lines[] = '';
             $lines[] = 'Jumla iliyolipwa: TZS '.number_format((int) ($totals->collected ?? 0));
             if ($includeFeeSplit) {
-                $lines[] = 'Ada ya platform iliyokusanywa: TZS '.number_format((int) ($totals->platform_fee ?? 0));
-                $lines[] = 'Ada ya Kijumbe iliyokusanywa: TZS '.number_format((int) ($totals->coordinator_fee ?? 0));
+                $lines[] = 'Ada ya platform iliyokusanywa: TZS '.number_format(
+                    (int) ($totals->platform_fee ?? 0) + (int) ($deducted->platform_fee ?? 0),
+                );
+                $lines[] = 'Ada ya Kijumbe iliyokusanywa: TZS '.number_format(
+                    (int) ($totals->coordinator_fee ?? 0) + (int) ($deducted->coordinator_fee ?? 0),
+                );
             }
         }
 
@@ -168,7 +181,9 @@ class GroupFinancialReportService
                     'processing' => 'INATUMWA',
                     default => 'ANASUBIRI',
                 };
-                $lines[] = '- Mzunguko '.$payout->round->number.": {$name} {$status} TZS ".number_format((int) $payout->amount);
+                $lines[] = '- Mzunguko '.$payout->round->number.": {$name} {$status} TZS ".number_format((int) $payout->amount)
+                    .' (jumla TZS '.number_format((int) $payout->gross_amount)
+                    .', ada TZS '.number_format((int) $payout->kijumbe_fee_amount).')';
             }
         }
 
