@@ -4,12 +4,15 @@ namespace App\Services;
 
 use App\Enums\GroupRole;
 use App\Enums\PaymentAttemptStatus;
+use App\Models\Cycle;
 use App\Models\Group;
 use App\Models\MemberPaymentObligation;
 use App\Models\PaymentAllocation;
 use App\Models\Payout;
 use App\Models\User;
 use Illuminate\Support\Collection;
+use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Schema;
 
 class GroupFinancialReportService
 {
@@ -188,5 +191,217 @@ class GroupFinancialReportService
         }
 
         return implode("\n", $lines);
+    }
+
+    /**
+     * @return array<int, array{
+     *     paid_total: int,
+     *     member_count: int,
+     *     paid_amount_per_member: int|null,
+     *     members: array<int, array{paid_amount: int, principal_amount: int, fee_amount: int, penalty_amount: int}>
+     * }>
+     */
+    public function cycleRoundLedgerTotals(Cycle $cycle): array
+    {
+        if (! Schema::hasTable('payment_allocations') || ! Schema::hasTable('payment_attempts') || ! Schema::hasTable('member_payment_obligations') || ! Schema::hasTable('group_member_slots')) {
+            return [];
+        }
+
+        $roundNumbers = $cycle->rounds->pluck('number')->map(fn ($number): int => (int) $number)->values()->all();
+        if ($roundNumbers === []) {
+            return [];
+        }
+
+        $rows = DB::table('payment_allocations as allocations')
+            ->join('payment_attempts as attempts', 'attempts.id', '=', 'allocations.payment_attempt_id')
+            ->join('member_payment_obligations as obligations', 'obligations.id', '=', 'allocations.member_payment_obligation_id')
+            ->join('group_member_slots as slots', 'slots.id', '=', 'obligations.group_member_slot_id')
+            ->where('obligations.group_id', $cycle->group_id)
+            ->whereIn('obligations.round_number', $roundNumbers)
+            ->where('attempts.status', PaymentAttemptStatus::Successful->value)
+            ->select([
+                'obligations.round_number',
+                'slots.group_member_id',
+                DB::raw('COALESCE(SUM(allocations.amount), 0) as paid_amount'),
+                DB::raw('COALESCE(SUM(allocations.principal_amount), 0) as principal_amount'),
+                DB::raw('COALESCE(SUM(allocations.kijumbe_fee_amount), 0) as fee_amount'),
+                DB::raw('COALESCE(SUM(allocations.penalty_amount), 0) as penalty_amount'),
+            ])
+            ->groupBy('obligations.round_number', 'slots.group_member_id')
+            ->orderBy('obligations.round_number')
+            ->get()
+            ->groupBy('round_number');
+
+        return $rows->mapWithKeys(function ($members, $roundNumber): array {
+            $memberTotals = $members->mapWithKeys(fn ($member): array => [(int) $member->group_member_id => [
+                'paid_amount' => (int) $member->paid_amount,
+                'principal_amount' => (int) $member->principal_amount,
+                'fee_amount' => (int) $member->fee_amount,
+                'penalty_amount' => (int) $member->penalty_amount,
+            ]])->all();
+            $paidAmounts = collect($memberTotals)->pluck('paid_amount')->filter(fn (int $amount): bool => $amount > 0)->unique()->values();
+
+            return [(int) $roundNumber => [
+                'paid_total' => (int) collect($memberTotals)->sum('paid_amount'),
+                'member_count' => count($memberTotals),
+                'paid_amount_per_member' => $paidAmounts->count() === 1 ? (int) $paidAmounts->first() : null,
+                'members' => $memberTotals,
+            ]];
+        })->all();
+    }
+
+    /**
+     * @return array<int, array{
+     *     current_paid_amount: int,
+     *     current_expected_amount: int,
+     *     current_coordinator_fee_amount: int,
+     *     current_coordinator_fee_paid_amount: int,
+     *     current_round_number: int|null,
+     *     total_paid_amount: int,
+     *     paid_amount: int,
+     *     expected_amount: int,
+     *     circle_amount: int,
+     *     circle_paid_amount: int,
+     *     coordinator_fee_amount: int,
+     *     coordinator_fee_paid_amount: int,
+     *     kijumbe_fee_amount: int,
+     *     slots_count: int
+     * }>
+     */
+    public function memberLedgerTotals(Group $group): array
+    {
+        if (Schema::hasTable('member_payment_obligations') && Schema::hasTable('group_member_slots')) {
+            $hasCoordinatorFee = Schema::hasColumn('member_payment_obligations', 'coordinator_fee_amount');
+            $latestRound = (int) DB::table('member_payment_obligations')
+                ->where('group_id', $group->id)
+                ->max('round_number');
+            $due = DB::table('group_members as gm')
+                ->leftJoin('group_member_slots as slots', function ($join): void {
+                    $join->on('slots.group_member_id', '=', 'gm.id')->where('slots.status', 'active');
+                })
+                ->leftJoin('member_payment_obligations as obligations', 'obligations.group_member_slot_id', '=', 'slots.id')
+                ->where('gm.group_id', $group->id)
+                ->select([
+                    'gm.id',
+                    DB::raw('COUNT(DISTINCT slots.id) as slots_count'),
+                    DB::raw('COALESCE(SUM(obligations.principal_amount), 0) as circle_amount'),
+                    DB::raw('COALESCE(SUM(obligations.kijumbe_fee_amount), 0) as kijumbe_fee_amount'),
+                    DB::raw($hasCoordinatorFee
+                        ? 'COALESCE(SUM(obligations.coordinator_fee_amount), 0) as coordinator_fee_amount'
+                        : '0 as coordinator_fee_amount'),
+                    DB::raw('COALESCE(SUM(obligations.principal_amount + obligations.kijumbe_fee_amount + obligations.penalty_amount), 0) as expected_amount'),
+                    DB::raw('COALESCE(SUM(obligations.paid_amount), 0) as paid_amount'),
+                    DB::raw('COALESCE(SUM(CASE WHEN obligations.paid_amount < obligations.principal_amount THEN obligations.paid_amount ELSE obligations.principal_amount END), 0) as circle_paid_fallback'),
+                ])
+                ->groupBy('gm.id')
+                ->get()
+                ->keyBy('id');
+
+            $currentDue = collect();
+            if ($latestRound > 0) {
+                $currentDue = DB::table('group_members as gm')
+                    ->join('group_member_slots as slots', function ($join): void {
+                        $join->on('slots.group_member_id', '=', 'gm.id')->where('slots.status', 'active');
+                    })
+                    ->join('member_payment_obligations as obligations', function ($join) use ($latestRound): void {
+                        $join->on('obligations.group_member_slot_id', '=', 'slots.id')
+                            ->where('obligations.round_number', $latestRound);
+                    })
+                    ->where('gm.group_id', $group->id)
+                    ->select([
+                        'gm.id',
+                        DB::raw('COALESCE(SUM(obligations.principal_amount + obligations.kijumbe_fee_amount + obligations.penalty_amount), 0) as current_expected_amount'),
+                        DB::raw('COALESCE(SUM(obligations.paid_amount), 0) as current_paid_fallback'),
+                        DB::raw($hasCoordinatorFee
+                            ? 'COALESCE(SUM(obligations.coordinator_fee_amount), 0) as current_coordinator_fee_amount'
+                            : '0 as current_coordinator_fee_amount'),
+                    ])
+                    ->groupBy('gm.id')
+                    ->get()
+                    ->keyBy('id');
+            }
+
+            $collected = collect();
+            if (Schema::hasTable('payment_allocations') && Schema::hasTable('payment_attempts')) {
+                $hasAllocationCoordinatorFee = Schema::hasColumn('payment_allocations', 'coordinator_fee_amount');
+                $collected = DB::table('group_members as gm')
+                    ->join('group_member_slots as slots', 'slots.group_member_id', '=', 'gm.id')
+                    ->join('member_payment_obligations as obligations', 'obligations.group_member_slot_id', '=', 'slots.id')
+                    ->join('payment_allocations as allocations', 'allocations.member_payment_obligation_id', '=', 'obligations.id')
+                    ->join('payment_attempts as attempts', 'attempts.id', '=', 'allocations.payment_attempt_id')
+                    ->where('gm.group_id', $group->id)
+                    ->where('attempts.status', PaymentAttemptStatus::Successful->value)
+                    ->select([
+                        'gm.id',
+                        DB::raw('COALESCE(SUM(allocations.amount), 0) as total_paid_amount'),
+                        DB::raw($latestRound > 0
+                            ? 'COALESCE(SUM(CASE WHEN obligations.round_number = '.$latestRound.' THEN allocations.amount ELSE 0 END), 0) as current_paid_amount'
+                            : '0 as current_paid_amount'),
+                        DB::raw($hasAllocationCoordinatorFee && $latestRound > 0
+                            ? 'COALESCE(SUM(CASE WHEN obligations.round_number = '.$latestRound.' THEN allocations.coordinator_fee_amount ELSE 0 END), 0) as current_coordinator_fee_paid_amount'
+                            : '0 as current_coordinator_fee_paid_amount'),
+                        DB::raw('COALESCE(SUM(allocations.principal_amount), 0) as circle_paid_amount'),
+                        DB::raw($hasAllocationCoordinatorFee
+                            ? 'COALESCE(SUM(allocations.coordinator_fee_amount), 0) as coordinator_fee_paid_amount'
+                            : '0 as coordinator_fee_paid_amount'),
+                    ])
+                    ->groupBy('gm.id')
+                    ->get()
+                    ->keyBy('id');
+            }
+
+            if ($due->isNotEmpty()) {
+                return $due->mapWithKeys(function ($row) use ($collected, $currentDue, $latestRound): array {
+                    $paid = $collected->get($row->id);
+                    $current = $currentDue->get($row->id);
+
+                    return [(int) $row->id => [
+                        'current_paid_amount' => $paid ? (int) $paid->current_paid_amount : (int) ($current?->current_paid_fallback ?? 0),
+                        'current_expected_amount' => (int) ($current?->current_expected_amount ?? 0),
+                        'current_coordinator_fee_amount' => (int) ($current?->current_coordinator_fee_amount ?? 0),
+                        'current_coordinator_fee_paid_amount' => $paid ? (int) $paid->current_coordinator_fee_paid_amount : 0,
+                        'current_round_number' => $latestRound > 0 ? $latestRound : null,
+                        'total_paid_amount' => $paid ? (int) $paid->total_paid_amount : (int) $row->paid_amount,
+                        'paid_amount' => (int) $row->paid_amount,
+                        'expected_amount' => (int) $row->expected_amount,
+                        'circle_amount' => (int) $row->circle_amount,
+                        'circle_paid_amount' => $paid ? (int) $paid->circle_paid_amount : (int) $row->circle_paid_fallback,
+                        'coordinator_fee_amount' => (int) $row->coordinator_fee_amount,
+                        'coordinator_fee_paid_amount' => $paid ? (int) $paid->coordinator_fee_paid_amount : 0,
+                        'kijumbe_fee_amount' => (int) $row->kijumbe_fee_amount,
+                        'slots_count' => (int) $row->slots_count,
+                    ]];
+                })->all();
+            }
+        }
+
+        return DB::table('group_members as gm')
+            ->leftJoin('cycle_members as cm', 'cm.group_member_id', '=', 'gm.id')
+            ->leftJoin('contributions as c', 'c.cycle_member_id', '=', 'cm.id')
+            ->where('gm.group_id', $group->id)
+            ->select([
+                'gm.id',
+                DB::raw('0 as slots_count'),
+                DB::raw('COALESCE(SUM(c.amount), 0) as expected_amount'),
+                DB::raw("COALESCE(SUM(CASE WHEN c.status IN ('paid', 'paid_late') THEN c.amount ELSE 0 END), 0) as paid_amount"),
+            ])
+            ->groupBy('gm.id')
+            ->get()
+            ->mapWithKeys(fn ($row): array => [(int) $row->id => [
+                'current_paid_amount' => (int) $row->paid_amount,
+                'current_expected_amount' => (int) $row->expected_amount,
+                'current_coordinator_fee_amount' => 0,
+                'current_coordinator_fee_paid_amount' => 0,
+                'current_round_number' => null,
+                'total_paid_amount' => (int) $row->paid_amount,
+                'paid_amount' => (int) $row->paid_amount,
+                'expected_amount' => (int) $row->expected_amount,
+                'circle_amount' => (int) $row->expected_amount,
+                'circle_paid_amount' => (int) $row->paid_amount,
+                'coordinator_fee_amount' => 0,
+                'coordinator_fee_paid_amount' => 0,
+                'kijumbe_fee_amount' => 0,
+                'slots_count' => (int) $row->slots_count,
+            ]])->all();
     }
 }

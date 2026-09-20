@@ -11,6 +11,7 @@ use App\Models\Cycle;
 use App\Models\Group;
 use App\Models\MemberPaymentObligation;
 use App\Services\GroupDeletionService;
+use App\Services\GroupFinancialReportService;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 
@@ -49,12 +50,12 @@ class AdminGroupController extends Controller
         return response()->json($query->paginate(min(max($request->integer('per_page', 25), 1), 100)));
     }
 
-    public function show(Group $group): JsonResponse
+    public function show(Group $group, GroupFinancialReportService $reports): JsonResponse
     {
         return response()->json(['data' => [
             'group' => $group->load('creator:id,name,email,phone'),
             'statistics' => $this->buildStatistics($group),
-            'members' => $this->buildMembers($group),
+            'members' => $this->buildMembers($group, $reports),
             'cycles' => $group->cycles()->latest()->get(),
         ]]);
     }
@@ -66,9 +67,9 @@ class AdminGroupController extends Controller
         return response()->json(['data' => ['id' => $id]]);
     }
 
-    public function members(Group $group): JsonResponse
+    public function members(Group $group, GroupFinancialReportService $reports): JsonResponse
     {
-        return response()->json(['data' => $this->buildMembers($group)]);
+        return response()->json(['data' => $this->buildMembers($group, $reports)]);
     }
 
     public function statistics(Group $group): JsonResponse
@@ -178,21 +179,45 @@ class AdminGroupController extends Controller
                 ->where('group_id', $group->id)
                 ->selectRaw('COALESCE(SUM(GREATEST(principal_amount + kijumbe_fee_amount + penalty_amount - paid_amount, 0)), 0) as total')
                 ->value('total'),
+            'contribution_amount' => (int) ($group->contribution_amount ?? 0),
+            'kijumbe_fee' => (int) ($group->kijumbe_fee ?? $group->platform_fee_amount ?? 0),
+            'coordinator_fee_amount' => (int) ($group->coordinator_fee_amount ?? 0),
+            'platform_fee_amount' => (int) ($group->platform_fee_amount ?? 0),
+            'platform_fee_percent' => (int) ($group->platform_fee_percent ?? 0),
         ];
     }
 
     /** @return array<int, mixed> */
-    private function buildMembers(Group $group): array
+    private function buildMembers(Group $group, GroupFinancialReportService $reports): array
     {
+        $payments = $reports->memberLedgerTotals($group);
+
         return $group->memberships()
             ->with(['user:id,name,email,phone,whatsapp_wa_id', 'slots'])
             ->where('is_active', true)
             ->orderBy('joined_at')
             ->get()
-            ->map(fn ($member): array => [
-                'membership' => $member,
-                'slots_count' => $member->slots->where('status', 'active')->count(),
-                'payout_positions' => $member->slots->where('status', 'active')->pluck('payout_position')->values(),
-            ])->all();
+            ->map(function ($member) use ($payments): array {
+                $activeSlots = $member->slots->where('status', 'active');
+                $totals = $payments[$member->id] ?? [
+                    'paid_amount' => 0,
+                    'expected_amount' => 0,
+                    'circle_amount' => 0,
+                    'circle_paid_amount' => 0,
+                    'coordinator_fee_amount' => 0,
+                    'coordinator_fee_paid_amount' => 0,
+                    'kijumbe_fee_amount' => 0,
+                    'slots_count' => $activeSlots->count(),
+                ];
+
+                return [
+                    'membership' => $member,
+                    'name' => $member->displayName(),
+                    'phone' => $member->displayPhone(),
+                    'slots_count' => $activeSlots->count(),
+                    'payout_positions' => $activeSlots->pluck('payout_position')->values(),
+                    'payments' => $totals,
+                ];
+            })->all();
     }
 }

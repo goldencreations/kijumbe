@@ -47,4 +47,37 @@ class GroupMember extends Model
     {
         return $this->hasMany(GroupMemberSlot::class);
     }
+
+    public function displayName(): string
+    {
+        $memberName = trim((string) ($this->member_name ?: ''));
+        $userName = trim((string) ($this->user?->name ?: ''));
+
+        if ($memberName !== '' && ! $this->looksLikePhoneLabel($memberName)) {
+            return $memberName;
+        }
+
+        if ($userName !== '' && ! $this->looksLikePhoneLabel($userName)) {
+            return $userName;
+        }
+
+        return $memberName !== '' ? $memberName : ($userName !== '' ? $userName : 'Member');
+    }
+
+    public function displayPhone(): ?string
+    {
+        return $this->user?->phone_local ?: $this->user?->whatsapp_phone_local;
+    }
+
+    private function looksLikePhoneLabel(string $value): bool
+    {
+        $trimmed = trim($value);
+        if (preg_match('/^whatsapp\s+\d{8,15}$/i', $trimmed) === 1) {
+            return true;
+        }
+
+        $digits = preg_replace('/\D+/', '', $trimmed) ?? '';
+
+        return $digits !== '' && strlen($digits) >= 9 && preg_match('/[A-Za-z]/', $trimmed) !== 1;
+    }
 }

@@ -12,6 +12,7 @@ use App\Models\Payout;
 use App\Models\Round;
 use App\Models\User;
 use App\Models\WhatsappMessage;
+use App\Services\GroupFinancialReportService;
 use App\Services\PhoneNumber;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
@@ -333,11 +334,18 @@ class AdminDashboardController extends Controller
         ];
     }
 
-    public function cycle(Cycle $cycle): View
+    public function cycle(Cycle $cycle, GroupFinancialReportService $reports): View
     {
-        return view('admin.cycle', ['page' => 'groups', 'title' => $cycle->name, 'cycle' => $cycle->load([
+        $cycle = $cycle->load([
             'group', 'members.groupMember.user', 'rounds.recipient.groupMember.user',
             'rounds.contributions.cycleMember.groupMember.user', 'rounds.contributions.paymentAttempts', 'rounds.payout', 'rounds.decisions.decider',
-        ])]);
+        ]);
+
+        return view('admin.cycle', [
+            'page' => 'groups',
+            'title' => $cycle->name,
+            'cycle' => $cycle,
+            'roundLedgerTotals' => $reports->cycleRoundLedgerTotals($cycle),
+        ]);
     }
 }
