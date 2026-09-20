@@ -3,6 +3,7 @@
 namespace App\Services;
 
 use App\Contracts\PaymentGateway;
+use App\Enums\GroupStatus;
 use App\Enums\PaymentAttemptStatus;
 use App\Models\Group;
 use App\Models\MemberPaymentObligation;
@@ -29,12 +30,14 @@ class MemberPaymentLedgerService
     {
         return Group::query()
             ->whereHas('memberships', fn ($query) => $query->where('user_id', $user->id)->where('is_active', true))
-            ->whereNotIn('status', ['archived'])
+            ->where('status', GroupStatus::Active->value)
             ->where(function ($query): void {
                 $query->whereNull('cycle_starts_at')->orWhere('cycle_starts_at', '<=', now());
             })
             ->orderBy('name')
-            ->get();
+            ->get()
+            ->filter(fn (Group $group): bool => $this->outstandingForUser($user, $group)->isNotEmpty())
+            ->values();
     }
 
     /** @return Collection<int, MemberPaymentObligation> */
