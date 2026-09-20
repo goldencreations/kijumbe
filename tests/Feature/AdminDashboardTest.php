@@ -80,7 +80,28 @@ class AdminDashboardTest extends TestCase
         $group = Group::create(['name' => 'Actual group', 'contribution_amount' => 2000, 'member_slots' => 3, 'created_by' => $admin->id, 'status' => 'draft']);
         GroupMember::create(['group_id' => $group->id, 'user_id' => $admin->id, 'role' => 'coordinator', 'is_active' => true, 'joined_at' => now()]);
         $id = $group->id;
-        $this->get('/admin/groups/'.$id)->assertOk()->assertSee('Actual group');
+        $this->get('/admin/groups/'.$id)
+            ->assertOk()
+            ->assertSee('Actual group')
+            ->assertViewHas('memberPayments', fn (array $payments): bool => collect($payments)->every(
+                fn (array $payment): bool => collect([
+                    'current_paid_amount',
+                    'current_expected_amount',
+                    'current_coordinator_fee_amount',
+                    'current_coordinator_fee_paid_amount',
+                    'current_round_number',
+                    'total_paid_amount',
+                    'paid_amount',
+                    'expected_amount',
+                    'circle_amount',
+                    'circle_paid_amount',
+                    'coordinator_fee_amount',
+                    'coordinator_fee_paid_amount',
+                    'kijumbe_fee_amount',
+                    'slots_count',
+                ])->every(fn (string $key): bool => array_key_exists($key, $payment)),
+            ))
+            ->assertViewHas('financialSummary', fn (array $summary): bool => array_key_exists('total_fees_earned', $summary));
         $this->postJson('/admin/actions/groups/'.$id.'/activate')->assertOk()->assertJsonPath('data.status', 'active');
         $this->postJson('/admin/actions/groups/'.$id.'/activate')->assertConflict();
         $member = User::factory()->create();

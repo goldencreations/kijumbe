@@ -195,14 +195,18 @@ class AdminDashboardController extends Controller
                 'hasSyntheticMchezo' => $hasSyntheticMchezo,
             ],
             'memberPayments' => $this->memberPaymentTotals($group),
+            'financialSummary' => $this->groupFinancialSummary($group),
             'users' => User::where('is_active', true)->whereDoesntHave('groupMemberships', fn ($q) => $q->where('group_id', $group->id)->where('is_active', true))->orderBy('name')->get(),
         ]);
     }
 
-    /** @return array<int, array{paid_amount: int, expected_amount: int, slots_count: int}> */
+    /** @return array<int, array<string, int|null>> */
     private function memberPaymentTotals(Group $group): array
     {
         if (Schema::hasTable('member_payment_obligations') && Schema::hasTable('group_member_slots')) {
+            $latestRound = (int) DB::table('member_payment_obligations')
+                ->where('group_id', $group->id)
+                ->max('round_number');
             $ledgerTotals = DB::table('group_members as gm')
                 ->leftJoin('group_member_slots as slots', function ($join): void {
                     $join->on('slots.group_member_id', '=', 'gm.id')->where('slots.status', 'active');
@@ -214,12 +218,36 @@ class AdminDashboardController extends Controller
                     DB::raw('COUNT(DISTINCT slots.id) as slots_count'),
                     DB::raw('COALESCE(SUM(obligations.principal_amount + obligations.kijumbe_fee_amount + obligations.penalty_amount), 0) as expected_amount'),
                     DB::raw('COALESCE(SUM(obligations.paid_amount), 0) as paid_amount'),
+                    DB::raw('COALESCE(SUM(obligations.principal_amount), 0) as circle_amount'),
+                    DB::raw('COALESCE(SUM(CASE WHEN obligations.paid_amount < obligations.principal_amount THEN obligations.paid_amount ELSE obligations.principal_amount END), 0) as circle_paid_amount'),
+                    DB::raw('COALESCE(SUM(obligations.coordinator_fee_amount), 0) as coordinator_fee_amount'),
+                    DB::raw('COALESCE(SUM(obligations.kijumbe_fee_amount), 0) as kijumbe_fee_amount'),
+                    DB::raw($latestRound > 0
+                        ? 'COALESCE(SUM(CASE WHEN obligations.round_number = '.$latestRound.' THEN obligations.principal_amount + obligations.kijumbe_fee_amount + obligations.penalty_amount ELSE 0 END), 0) as current_expected_amount'
+                        : '0 as current_expected_amount'),
+                    DB::raw($latestRound > 0
+                        ? 'COALESCE(SUM(CASE WHEN obligations.round_number = '.$latestRound.' THEN obligations.paid_amount ELSE 0 END), 0) as current_paid_amount'
+                        : '0 as current_paid_amount'),
+                    DB::raw($latestRound > 0
+                        ? 'COALESCE(SUM(CASE WHEN obligations.round_number = '.$latestRound.' THEN obligations.coordinator_fee_amount ELSE 0 END), 0) as current_coordinator_fee_amount'
+                        : '0 as current_coordinator_fee_amount'),
                 ])
                 ->groupBy('gm.id')
                 ->get()
                 ->mapWithKeys(fn ($row): array => [(int) $row->id => [
                     'paid_amount' => (int) $row->paid_amount,
+                    'total_paid_amount' => (int) $row->paid_amount,
                     'expected_amount' => (int) $row->expected_amount,
+                    'current_paid_amount' => (int) $row->current_paid_amount,
+                    'current_expected_amount' => (int) $row->current_expected_amount,
+                    'current_coordinator_fee_amount' => (int) $row->current_coordinator_fee_amount,
+                    'current_coordinator_fee_paid_amount' => 0,
+                    'current_round_number' => $latestRound > 0 ? $latestRound : null,
+                    'circle_amount' => (int) $row->circle_amount,
+                    'circle_paid_amount' => (int) $row->circle_paid_amount,
+                    'coordinator_fee_amount' => (int) $row->coordinator_fee_amount,
+                    'coordinator_fee_paid_amount' => 0,
+                    'kijumbe_fee_amount' => (int) $row->kijumbe_fee_amount,
                     'slots_count' => (int) $row->slots_count,
                 ]])
                 ->all();
@@ -243,10 +271,66 @@ class AdminDashboardController extends Controller
             ->get()
             ->mapWithKeys(fn ($row): array => [(int) $row->id => [
                 'paid_amount' => (int) $row->paid_amount,
+                'total_paid_amount' => (int) $row->paid_amount,
                 'expected_amount' => (int) $row->expected_amount,
+                'current_paid_amount' => (int) $row->paid_amount,
+                'current_expected_amount' => (int) $row->expected_amount,
+                'current_coordinator_fee_amount' => 0,
+                'current_coordinator_fee_paid_amount' => 0,
+                'current_round_number' => null,
+                'circle_amount' => (int) $row->expected_amount,
+                'circle_paid_amount' => (int) $row->paid_amount,
+                'coordinator_fee_amount' => 0,
+                'coordinator_fee_paid_amount' => 0,
+                'kijumbe_fee_amount' => 0,
                 'slots_count' => (int) $row->slots_count,
             ]])
             ->all();
+    }
+
+    /** @return array<string, int> */
+    private function groupFinancialSummary(Group $group): array
+    {
+        $platformPercent = max(0, min(100, (int) ($group->platform_fee_percent ?? 30)));
+        $collected = DB::table('payment_allocations as allocations')
+            ->join('payment_attempts as attempts', 'attempts.id', '=', 'allocations.payment_attempt_id')
+            ->join('member_payment_obligations as obligations', 'obligations.id', '=', 'allocations.member_payment_obligation_id')
+            ->where('obligations.group_id', $group->id)
+            ->where('attempts.status', PaymentAttemptStatus::Successful->value)
+            ->selectRaw(
+                'COUNT(DISTINCT attempts.id) as successful_payment_count, '
+                .'COALESCE(SUM(allocations.amount), 0) as total_collected_amount, '
+                .'COALESCE(SUM(allocations.principal_amount), 0) as principal_collected_amount, '
+                .'COALESCE(SUM(allocations.penalty_amount), 0) as penalties_collected_amount, '
+                .'COALESCE(SUM(allocations.platform_fee_amount), 0) as platform_fees, '
+                .'COALESCE(SUM(allocations.coordinator_fee_amount), 0) as coordinator_fees'
+            )
+            ->first();
+        $deducted = Payout::query()
+            ->join('rounds', 'rounds.id', '=', 'payouts.round_id')
+            ->join('cycles', 'cycles.id', '=', 'rounds.cycle_id')
+            ->where('cycles.group_id', $group->id)
+            ->where('payouts.purpose', Payout::PURPOSE_MEMBER)
+            ->where('payouts.status', 'paid')
+            ->selectRaw(
+                'COALESCE(SUM(payouts.platform_fee_amount), 0) as platform_fees, '
+                .'COALESCE(SUM(payouts.coordinator_fee_amount), 0) as coordinator_fees'
+            )
+            ->first();
+        $platformFees = (int) ($collected->platform_fees ?? 0) + (int) ($deducted->platform_fees ?? 0);
+        $coordinatorFees = (int) ($collected->coordinator_fees ?? 0) + (int) ($deducted->coordinator_fees ?? 0);
+
+        return [
+            'successful_payment_count' => (int) ($collected->successful_payment_count ?? 0),
+            'total_collected_amount' => (int) ($collected->total_collected_amount ?? 0),
+            'principal_collected_amount' => (int) ($collected->principal_collected_amount ?? 0),
+            'penalties_collected_amount' => (int) ($collected->penalties_collected_amount ?? 0),
+            'total_fees_earned' => $platformFees + $coordinatorFees,
+            'coordinator_fees_earned' => $coordinatorFees,
+            'kijumbe_fees_earned' => $platformFees,
+            'coordinator_share_percent' => 100 - $platformPercent,
+            'kijumbe_share_percent' => $platformPercent,
+        ];
     }
 
     public function cycle(Cycle $cycle): View
