@@ -536,4 +536,89 @@ class MichezoPayoutSyncServiceTest extends TestCase
         $this->assertSame(36000, $round->payout_amount);
         Carbon::setTestNow();
     }
+
+    public function test_fully_funded_future_payout_round_stays_scheduled_with_its_own_grace_deadline(): void
+    {
+        Carbon::setTestNow(Carbon::parse('2026-09-23 12:00:00', 'Africa/Dar_es_Salaam'));
+        $users = User::factory()->count(4)->create();
+        $group = Group::create([
+            'name' => 'Different contribution and payout intervals',
+            'status' => GroupStatus::Active,
+            'created_by' => $users[0]->id,
+            'contribution_amount' => 200,
+            'currency' => 'TZS',
+            'contribution_interval_days' => 1,
+            'payout_interval_days' => 2,
+            'cycle_starts_at' => '2026-09-20 00:00:00',
+            'penalty_timing_hours' => 1,
+        ]);
+
+        foreach ($users as $index => $user) {
+            $membership = GroupMember::create([
+                'group_id' => $group->id,
+                'user_id' => $user->id,
+                'member_name' => $user->name,
+                'majina_count' => 1,
+                'role' => $index === 0 ? GroupRole::Coordinator : GroupRole::Member,
+                'is_active' => true,
+                'joined_at' => now(),
+            ]);
+            GroupMemberSlot::create([
+                'group_id' => $group->id,
+                'group_member_id' => $membership->id,
+                'slot_number' => 1,
+                'payout_position' => $index + 1,
+                'status' => 'active',
+            ]);
+        }
+
+        app(MemberPaymentLedgerService::class)->materialize($group);
+        $obligations = MemberPaymentObligation::query()
+            ->where('group_id', $group->id)
+            ->where('round_number', 4)
+            ->get();
+
+        foreach ($obligations as $index => $obligation) {
+            $attempt = PaymentAttempt::create([
+                'contribution_id' => null,
+                'payment_scope' => 'member_ledger',
+                'initiated_by' => $users[$index]->id,
+                'provider' => 'ecofy',
+                'method' => 'mobile_money',
+                'order_reference' => 'FUTURE-'.$index,
+                'idempotency_key' => 'future-round-'.$index,
+                'phone_e164' => '25570000000'.$index,
+                'amount' => 200,
+                'currency' => 'TZS',
+                'status' => PaymentAttemptStatus::Successful,
+                'provider_reference' => 'FUTURE-PROVIDER-'.$index,
+                'completed_at' => now(),
+                'metadata' => ['group_id' => $group->id, 'member_id' => $users[$index]->id],
+            ]);
+            PaymentAllocation::create([
+                'payment_attempt_id' => $attempt->id,
+                'member_payment_obligation_id' => $obligation->id,
+                'amount' => 200,
+                'principal_amount' => 200,
+                'kijumbe_fee_amount' => 0,
+                'platform_fee_amount' => 0,
+                'coordinator_fee_amount' => 0,
+                'penalty_amount' => 0,
+            ]);
+            $obligation->update(['paid_amount' => 200, 'status' => 'paid', 'paid_at' => now()]);
+        }
+
+        app(MichezoPayoutSyncService::class)->sync($group->fresh());
+
+        $round = $group->cycles()->firstOrFail()->rounds()->where('number', 4)->firstOrFail();
+        $this->assertSame(RoundStatus::Scheduled, $round->status);
+        $this->assertSame('2026-09-26 00:00:00', $round->due_at->format('Y-m-d H:i:s'));
+        $this->assertSame('2026-09-26 01:00:00', $round->grace_ends_at->format('Y-m-d H:i:s'));
+        $this->assertDatabaseCount('contributions', 16);
+        $this->assertSame(
+            4,
+            $round->contributions()->where('status', 'paid_late')->count(),
+        );
+        Carbon::setTestNow();
+    }
 }

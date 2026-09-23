@@ -58,13 +58,15 @@
                 $membership = $contribution?->cycleMember?->groupMember ?: $obligation?->slot?->groupMember;
                 $member = $membership?->user;
                 $group = $contribution?->round?->cycle?->group ?: $obligation?->group;
-                $memberName = $member?->name ?: 'WhatsApp '.($record->phone_e164 ?: 'unknown number');
-                $memberPhone = app(\App\Services\PhoneNumber::class)->forDisplay($member?->whatsapp_wa_id ?: ($member?->phone ?: $record->phone_e164));
-                $roundNumber = $contribution?->round?->number ?: $obligation?->round_number;
+                $memberName = $membership?->displayName() ?: ($member?->name ?: 'WhatsApp '.($record->phone_e164 ?: 'unknown number'));
+                $memberPhone = $membership?->displayPhone() ?: app(\App\Services\PhoneNumber::class)->forDisplay($member?->whatsapp_wa_id ?: ($member?->phone ?: $record->phone_e164));
+                $roundNumbers = $record->allocations->map(fn ($allocation) => $allocation->obligation?->round_number)->filter()->unique()->sort()->values();
+                $roundNumber = $contribution?->round?->number ?: $roundNumbers->first();
+                $roundLabel = $roundNumbers->count() > 1 ? 'Rounds '.implode(', ', $roundNumbers->all()) : ($roundNumber ? 'Round '.$roundNumber : null);
                 $paymentDate = $record->completed_at ?: ($record->failed_at ?: ($record->initiated_at ?: $record->created_at));
                 $reference = $record->provider_reference ?: $record->order_reference;
             @endphp
-            <td><div class="person-cell"><span class="avatar">{{ mb_substr($memberName, 0, 1) }}</span><div><strong>{{ $memberName }}</strong><small>{{ $memberPhone ?: 'Phone unavailable' }}</small>@if($group)<a class="table-group-link" href="{{ route('admin.group', $group) }}">{{ $group->name }}@if($roundNumber) &middot; Round {{ $roundNumber }}@endif</a>@else<span class="muted">Group unavailable</span>@endif</div></div></td>
+            <td><div class="person-cell"><span class="avatar">{{ mb_substr($memberName, 0, 1) }}</span><div><strong>{{ $memberName }}</strong><small>{{ $memberPhone ?: 'Phone unavailable' }}</small>@if($group)<a class="table-group-link" href="{{ route('admin.group', $group) }}">{{ $group->name }}@if($roundLabel) &middot; {{ $roundLabel }}@endif</a>@else<span class="muted">Group unavailable</span>@endif</div></div></td>
             <td class="numeric"><strong>{{ $record->currency ?: 'TZS' }} {{ number_format($record->amount) }}</strong><small>{{ ucfirst(str_replace('_', ' ', $record->payment_scope ?: 'contribution')) }}</small></td>
             <td>{{ $paymentDate->timezone('Africa/Dar_es_Salaam')->format('d M Y') }}<small>{{ $paymentDate->timezone('Africa/Dar_es_Salaam')->format('H:i') }} EAT</small></td>
             <td><x-status :value="$record->status"/></td>

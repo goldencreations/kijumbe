@@ -1,0 +1,11 @@
+{
+    "schema_version": 2,
+    "commit": "",
+    "indexed_at": "2026-09-22T12:29:04Z",
+    "project": "kijumbe",
+    "nodes": 1338,
+    "edges": 5055,
+    "original_size": 3538944,
+    "compressed_size": 286384,
+    "compression_level": 9
+}

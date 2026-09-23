@@ -123,8 +123,7 @@ class MichezoPayoutSyncService
 
                 $payoutInterval = max((int) ($group->payout_interval_days ?: 1), 1);
                 $roundDueAt = $startsAt->copy()->addDays(($roundNumber - 1) * $payoutInterval);
-                $latestContributionDueAt = $obligations->max('due_at') ?? $roundDueAt;
-                $graceEndsAt = $latestContributionDueAt->copy()->addHours(
+                $graceEndsAt = $roundDueAt->copy()->addHours(
                     max((int) ($group->penalty_timing_hours ?? $group->grace_period_hours ?? 0), 0),
                 );
 
@@ -175,8 +174,8 @@ class MichezoPayoutSyncService
                 [$platformFee, $coordinatorFee] = Group::splitKijumbeFee($deductedFee, $platformPercent);
                 $netPayout = max($required - $deductedFee, 0);
                 $status = match (true) {
-                    $fullyFunded => RoundStatus::ReadyForPayout,
                     now()->lt($roundDueAt) => RoundStatus::Scheduled,
+                    $fullyFunded => RoundStatus::ReadyForPayout,
                     now()->lte($graceEndsAt) => RoundStatus::InGrace,
                     default => RoundStatus::Blocked,
                 };
