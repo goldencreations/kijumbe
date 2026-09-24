@@ -29,6 +29,8 @@ class WhatsappMessageTemplateTest extends TestCase
             ->assertSee('Main menu')
             ->assertSee('Create group start')
             ->assertSee('BADILI TAARIFA - Badili mchezo unaoratibu')
+            ->assertSee('data-template-preview', false)
+            ->assertSee('data-template-format="bullet"', false)
             ->assertSee('{group_name}');
 
         $body = 'Habari, deni la {group_name} ni TZS {contribution_due}{penalty_notice} {deadline_notice}.';

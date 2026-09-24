@@ -69,7 +69,7 @@ const renderTemplateInline = value => {
         else {
             const formatted = document.createElement(match[2] ? 'code' : match[3] ? 'strong' : 'em');
             if (match[2]) formatted.className = 'template-format-monospace';
-            formatted.textContent = match[2] || match[3] || match[4];
+            formatted.append(renderTemplateInline(match[2] || match[3] || match[4]));
             fragment.append(formatted);
         }
         cursor = match.index + match[0].length;
@@ -77,11 +77,9 @@ const renderTemplateInline = value => {
     if (cursor < value.length) fragment.append(document.createTextNode(value.slice(cursor)));
     return fragment;
 };
-const renderTemplateEditor = editor => {
-    const input = editor.closest('form')?.querySelector('[data-template-input]');
-    if (!input) return;
+const renderTemplateValue = (container, value) => {
     const fragment = document.createDocumentFragment();
-    input.value.split('\n').forEach(line => {
+    value.split('\n').forEach(line => {
         const quote = line.startsWith('> ');
         const bullet = /^[-*] /.test(line);
         const block = document.createElement(quote ? 'blockquote' : 'div');
@@ -89,7 +87,12 @@ const renderTemplateEditor = editor => {
         block.append(renderTemplateInline(line.replace(quote ? /^> / : bullet ? /^[-*] / : /^/, '')));
         fragment.append(block);
     });
-    editor.replaceChildren(fragment);
+    container.replaceChildren(fragment);
+};
+const renderTemplateEditor = editor => {
+    const input = editor.closest('form')?.querySelector('[data-template-input]');
+    if (!input) return;
+    renderTemplateValue(editor, input.value);
 };
 const serializeTemplateNode = node => {
     if (node.nodeType === Node.TEXT_NODE) return node.textContent.replace(/\u00a0/g, '');
@@ -109,6 +112,27 @@ const syncTemplateEditor = editor => {
     if (!input) return;
     input.value = [...editor.children].map(serializeTemplateNode).join('\n').replace(/\r\n/g, '\n');
 };
+const toggleTemplateLines = (editor, range, format, button) => {
+    const lines = [...editor.children].filter(line => range.intersectsNode(line));
+    if (lines.length === 0) return false;
+    const removing = format === 'bullet'
+        ? lines.every(line => line.hasAttribute('data-template-bullet'))
+        : lines.every(line => line.matches('blockquote'));
+    lines.forEach(line => {
+        if (format === 'bullet') {
+            line.toggleAttribute('data-template-bullet', !removing);
+            return;
+        }
+        const replacement = document.createElement(removing ? 'div' : 'blockquote');
+        if (line.hasAttribute('data-template-bullet')) replacement.dataset.templateBullet = 'true';
+        replacement.append(...line.childNodes);
+        line.replaceWith(replacement);
+    });
+    syncTemplateEditor(editor);
+    button.classList.toggle('is-active', !removing);
+    button.setAttribute('aria-pressed', String(!removing));
+    return true;
+};
 const templateFormat = (editor, format, button) => {
     if (!editor) return;
     editor.focus();
@@ -116,6 +140,7 @@ const templateFormat = (editor, format, button) => {
     const selection = window.getSelection();
     const range = selection?.rangeCount ? selection.getRangeAt(0) : null;
     if (!range || !editor.contains(range.commonAncestorContainer)) return;
+    if (['bullet', 'quote'].includes(format) && toggleTemplateLines(editor, range, format, button)) return;
     const tokenSelected = range && [...editor.querySelectorAll('[data-template-token]')].some(token => range.intersectsNode(token));
     if (tokenSelected && !range.collapsed && ['bold', 'italic', 'monospace'].includes(format)) {
         const token = [...editor.querySelectorAll('[data-template-token]')].find(candidate => range.intersectsNode(candidate));
@@ -167,6 +192,7 @@ document.querySelectorAll('[data-template-editor]').forEach(editor => {
     });
     syncTemplateEditor(editor);
 });
+document.querySelectorAll('[data-template-preview]').forEach(preview => renderTemplateValue(preview, preview.textContent));
 document.querySelectorAll('[data-template-toolbar]').forEach(toolbar => {
     const editor = toolbar.closest('form')?.querySelector('[data-template-editor]');
     toolbar.querySelectorAll('[data-template-format]').forEach(button => {
@@ -228,7 +254,12 @@ document.querySelectorAll('[data-api-form]').forEach(form => form.addEventListen
         }
         sessionStorage.setItem('kijumbe-notice', 'Saved successfully.');
         const redirect = form.dataset.redirect;
-        location.assign(redirect ? redirect.replace('{id}', encodeURIComponent(data.data.id)) : location.href);
+        if (redirect) {
+            location.assign(redirect.replace('{id}', encodeURIComponent(data.data.id)));
+        } else {
+            sessionStorage.setItem('kijumbe-scroll-y', String(window.scrollY));
+            location.reload();
+        }
     } catch (error) {
         errorBox.textContent = error instanceof SyntaxError ? 'Template components must be valid JSON.' : error.message;
         errorBox.hidden = false;
@@ -244,6 +275,12 @@ if (notice && document.querySelector('#toast')) {
     toast.hidden = false;
     sessionStorage.removeItem('kijumbe-notice');
     setTimeout(() => { toast.hidden = true; }, 4000);
+}
+const savedScrollValue = sessionStorage.getItem('kijumbe-scroll-y');
+const savedScrollY = Number(savedScrollValue);
+if (savedScrollValue !== null) {
+    sessionStorage.removeItem('kijumbe-scroll-y');
+    if (Number.isFinite(savedScrollY)) requestAnimationFrame(() => window.scrollTo({ top: savedScrollY, behavior: 'auto' }));
 }
 
 Chart.defaults.font.family = "'Instrument Sans', sans-serif";

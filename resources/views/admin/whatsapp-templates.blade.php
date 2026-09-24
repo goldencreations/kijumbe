@@ -13,7 +13,7 @@
                 <div><h2>{{ $template['name'] }}</h2><p>{{ $template['description'] }}</p></div>
                 <div class="heading-actions"><span class="badge {{ $template['is_custom'] ? 'badge-active' : '' }}"><span></span>{{ $template['is_custom'] ? 'Customized' : 'Default' }}</span><button class="button secondary" data-open-dialog="edit-template-{{ $template['key'] }}"><i data-lucide="settings-2"></i>Edit</button>@if($template['is_custom'])<button class="icon-button" data-open-dialog="reset-template-{{ $template['key'] }}" title="Restore default" aria-label="Restore {{ $template['name'] }} default"><i data-lucide="rotate-ccw"></i></button>@endif</div>
             </div>
-            <pre class="template-body">{{ $template['body'] }}</pre>
+            <div class="template-body" data-template-preview>{{ $template['body'] }}</div>
             <div class="template-meta"><span>Live variables</span><div>@forelse($template['variables'] as $variable)<code>{<span>{{ $variable }}</span>}</code>@empty<small>None</small>@endforelse</div>@if($template['updated_at'])<small>Last changed {{ $template['updated_at']->timezone('Africa/Dar_es_Salaam')->format('d M Y, H:i') }} EAT{{ $template['updated_by'] ? ' by '.$template['updated_by'] : '' }}</small>@endif</div>
         </article>
 
