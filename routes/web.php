@@ -3,6 +3,7 @@
 use App\Http\Controllers\AdminAuthController;
 use App\Http\Controllers\AdminDashboardController;
 use App\Http\Controllers\AdminGroupController;
+use App\Http\Controllers\AdminWhatsappMessageTemplateController;
 use App\Http\Controllers\Api\V1;
 use App\Http\Middleware\EnsureAdministrator;
 use Illuminate\Support\Facades\Route;
@@ -20,6 +21,7 @@ Route::middleware(['auth', EnsureAdministrator::class])->prefix('admin')->group(
     Route::get('/dashboard', AdminDashboardController::class)->name('admin.dashboard');
     Route::get('/groups/{group}', [AdminDashboardController::class, 'group'])->name('admin.group');
     Route::get('/cycles/{cycle}', [AdminDashboardController::class, 'cycle'])->name('admin.cycle');
+    Route::get('/whatsapp/message-templates', [AdminWhatsappMessageTemplateController::class, 'index'])->name('admin.whatsapp.templates');
     Route::get('/{section}', [AdminDashboardController::class, 'listing'])->whereIn('section', ['groups', 'members', 'payments', 'payouts', 'whatsapp', 'audit', 'exceptions'])->name('admin.list');
 
     Route::prefix('actions')->middleware('throttle:60,1')->group(function () {
@@ -31,6 +33,8 @@ Route::middleware(['auth', EnsureAdministrator::class])->prefix('admin')->group(
         Route::post('/members', [V1\OfficeUserController::class, 'store']);
         Route::put('/members/{user}/whatsapp', [V1\WhatsappUserController::class, 'configure']);
         Route::post('/whatsapp/templates', [V1\WhatsappUserController::class, 'sendTemplate']);
+        Route::put('/whatsapp/message-templates/{key}', [AdminWhatsappMessageTemplateController::class, 'update']);
+        Route::delete('/whatsapp/message-templates/{key}', [AdminWhatsappMessageTemplateController::class, 'destroy']);
         Route::post('/contributions/{contribution}/payment-attempts', [V1\PaymentAttemptController::class, 'store']);
         Route::post('/rounds/{round}/decisions', [V1\RoundDecisionController::class, 'store']);
         Route::post('/rounds/{round}/live-payouts', [V1\LivePayoutController::class, 'store']);

@@ -10,6 +10,7 @@ use App\Models\Payout;
 use App\Models\Round;
 use App\Models\User;
 use App\Services\Whatsapp\MetaWhatsAppClient;
+use App\Services\Whatsapp\WhatsappMessageTemplateService;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Log;
 use Symfony\Component\HttpKernel\Exception\ConflictHttpException;
@@ -21,6 +22,7 @@ class PayoutService
         private readonly AuditService $audit,
         private readonly MetaWhatsAppClient $whatsapp,
         private readonly CycleCompletionNotifier $cycleCompletions,
+        private readonly WhatsappMessageTemplateService $messages,
     ) {}
 
     public function record(User $actor, Round $round, array $data): Payout
@@ -194,15 +196,15 @@ class PayoutService
             return;
         }
 
-        $message = "MAREJESHO YAMELIPWA\n"
-            ."Mchezo: {$group->name}\n"
-            ."Mpokeaji: {$recipient->name}\n"
-            .'Jumla ya mchezo: TZS '.number_format((int) $payout->gross_amount)."\n"
-            .'Ada ya Kijumbe: TZS '.number_format((int) $payout->kijumbe_fee_amount)."\n"
-            .'Kiasi alichopokea: TZS '.number_format((int) $payout->amount)."\n"
-            .'Mzunguko: '.($payout->round?->number ?? '-')."\n"
-            .'Muda: '.($payout->processed_at ?: now())->format('d/m/Y H:i')." EAT\n\n"
-            .'Tuma TAARIFA kuona hali ya mchezo wako.';
+        $message = $this->messages->render('payout_completed', [
+            'group_name' => $group->name,
+            'recipient_name' => $recipient->name,
+            'gross_amount' => number_format((int) ($payout->gross_amount ?: $payout->amount)),
+            'kijumbe_fee_amount' => number_format((int) ($payout->kijumbe_fee_amount ?? 0)),
+            'amount' => number_format((int) $payout->amount),
+            'round_number' => $payout->round?->number ?? '-',
+            'paid_at' => ($payout->processed_at ?: now())->format('d/m/Y H:i'),
+        ]);
 
         $members = User::query()
             ->whereKeyNot($recipient->id)

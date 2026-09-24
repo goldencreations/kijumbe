@@ -39,6 +39,7 @@ class WhatsappConversationService
         private readonly GroupFinancialReportService $financialReports,
         private readonly PhoneNumber $phones,
         private readonly PayoutSecurityService $payoutSecurity,
+        private readonly WhatsappMessageTemplateService $messages,
     ) {}
 
     /** @param array<string, mixed> $message */
@@ -1612,7 +1613,7 @@ class WhatsappConversationService
 
     private function paymentDebtSummary(Group $group, Collection $obligations): string
     {
-        $lines = ["Deni la {$group->name} kwa mizunguko:"];
+        $lines = [];
         foreach ($obligations->groupBy('round_number') as $round => $roundObligations) {
             $lines[] = "Mzunguko {$round}:";
             foreach ($roundObligations as $obligation) {
@@ -1622,10 +1623,12 @@ class WhatsappConversationService
             }
         }
         $total = $obligations->sum(fn ($obligation) => max((int) $obligation->principal_amount + (int) $obligation->kijumbe_fee_amount + (int) $obligation->penalty_amount - (int) $obligation->paid_amount, 0));
-        $lines[] = 'Jumla ya deni: TZS '.number_format($total);
-        $lines[] = 'Kiasi utakacholipa kitatumika kwanza kwenye mzunguko wa zamani zaidi; kikizidi, salio litatumika kwenye mizunguko inayofuata.';
 
-        return implode("\n", $lines);
+        return $this->messages->render('payment_debt_summary', [
+            'group_name' => $group->name,
+            'debt_breakdown' => implode("\n", $lines),
+            'total_debt' => number_format($total),
+        ]);
     }
 
     private function sendGroupCreatedMessages(User $user, Group $group): void

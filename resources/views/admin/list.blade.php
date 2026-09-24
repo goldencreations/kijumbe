@@ -6,7 +6,7 @@
 @endphp
 <div class="page-heading"><div><h1>{{ $title }}</h1><p>{{ $descriptions[$page] }}</p></div>
 @if($page === 'members')<button class="button primary" data-open-dialog="create-member"><i data-lucide="user-plus"></i>Add member</button>@endif
-@if($page === 'whatsapp')<button class="button primary" data-open-dialog="send-template"><i data-lucide="send"></i>Send template</button>@endif
+@if($page === 'whatsapp')<div class="heading-actions"><a class="button secondary" href="{{ route('admin.whatsapp.templates') }}"><i data-lucide="settings-2"></i>Message templates</a><button class="button primary" data-open-dialog="send-template"><i data-lucide="send"></i>Send template</button></div>@endif
 </div>
 <section class="data-section full-table">
     <form method="get" class="filter-bar">
