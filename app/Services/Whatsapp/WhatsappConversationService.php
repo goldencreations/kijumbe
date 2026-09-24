@@ -67,7 +67,7 @@ class WhatsappConversationService
 
         if (in_array($command, ['KATISHA', 'ACHA'], true)) {
             $this->flowSessions->cancelActive($user);
-            $this->whatsapp->sendText($user, "Mchakato umefutwa.\n\n".$this->mainMenuMessage());
+            $this->whatsapp->sendText($user, $this->messages->render('flow_cancelled', ['main_menu' => $this->mainMenuMessage()]));
 
             return;
         }
@@ -151,9 +151,12 @@ class WhatsappConversationService
 
         if ($command === 'STATUS') {
             if (! $contribution) {
-                $this->whatsapp->sendText($user, 'Huna mchango unaosubiri kulipiwa.');
+                $this->whatsapp->sendText($user, $this->messages->render('status_clear', []));
             } else {
-                $this->whatsapp->sendText($user, "Mchango unaosubiri: TZS {$contribution->amount}. Mwisho wa kulipa ni {$contribution->due_at->timezone('Africa/Dar_es_Salaam')->format('d M Y H:i')}.");
+                $this->whatsapp->sendText($user, $this->messages->render('status_due', [
+                    'amount' => number_format((int) $contribution->amount),
+                    'deadline' => $contribution->due_at->timezone('Africa/Dar_es_Salaam')->format('d M Y H:i'),
+                ]));
             }
 
             return;
@@ -169,7 +172,7 @@ class WhatsappConversationService
 
         if (in_array($command, ['KATISHA', 'ACHA'], true)) {
             $this->flowSessions->cancelActive($user);
-            $this->whatsapp->sendText($user, "Mchakato umefutwa.\n\n".$this->mainMenuMessage());
+            $this->whatsapp->sendText($user, $this->messages->render('flow_cancelled', ['main_menu' => $this->mainMenuMessage()]));
 
             return true;
         }
@@ -215,7 +218,7 @@ class WhatsappConversationService
             $session = $this->flowSessions->startGroupCreation($user, [
                 'last_message_id' => $messageId,
             ]);
-            $this->whatsapp->sendText($user, "Karibu Kijumbe. Tutaunda kikundi hatua kwa hatua kwa mazungumzo ya Kiswahili. Jibu kila swali; unaweza kurudi baadaye kuendelea.\n\n");
+            $this->whatsapp->sendText($user, $this->messages->render('group_creation_start', []));
         } else {
             $this->whatsapp->sendText($user, 'Tunaendelea na uundaji wa kikundi chako.');
         }
@@ -424,7 +427,7 @@ class WhatsappConversationService
             }
         }
 
-        $this->whatsapp->sendText($user, $this->mainMenuMessage()."\n\nKwa kujiunga au kuona taarifa za mchezo, tuma msimbo wa mchezo uliopokea.");
+        $this->whatsapp->sendText($user, $this->mainMenuMessage());
         $this->flowSessions->startGroupAction($user, 'await_group_code', []);
 
         return true;
@@ -789,16 +792,7 @@ class WhatsappConversationService
 
     private function mainMenuMessage(): string
     {
-        return "Karibu Kijumbe. Chagua huduma kwa kutuma moja ya maneno haya:\n\n"
-            ."UNDA KIKUNDI - Unda mchezo mpya wa michango\n"
-            ."BADILI TAARIFA - Badili mchezo unaoratibu\n"
-            ."LIPA - Lipa mchango wa mchezo mmoja au zaidi\n"
-            ."POKEA - Pokea marejesho yako siku yako ikifika\n"
-            ."NAMBA YA SIRI - Weka au badili namba ya siri ya kupokea fedha\n"
-            ."STATUS - Angalia mchango unaodaiwa\n"
-            ."TAARIFA - Pata ripoti ya waliolipa na waliopokea kwenye michezo yako\n"
-            ."KATISHA - Futa mchakato unaoendelea\n\n"
-            .'Kwa kujiunga, kulipa, au kuona taarifa za mchezo, tuma msimbo wa mchezo.';
+        return $this->messages->render('main_menu', []);
     }
 
     private function startGroupEditFlow(User $user): void
@@ -820,23 +814,25 @@ class WhatsappConversationService
                 'group_id' => $group->id,
                 'group_code' => $group->group_code ?: $group->id,
             ]);
-            $this->whatsapp->sendText($user, "Mchezo: {$group->name}\n\n".$this->groupEditMenu());
+            $this->whatsapp->sendText($user, $this->messages->render('group_edit_start', [
+                'group_name' => $group->name,
+                'edit_menu' => $this->groupEditMenu(),
+            ]));
 
             return;
         }
 
         $groupIds = [];
-        $message = "Chagua mchezo unaotaka kubadili:\n";
+        $groupLines = [];
         foreach ($groups as $index => $group) {
             $number = $index + 1;
             $groupIds[$number] = $group->id;
-            $message .= "{$number}. {$group->name}\n";
+            $groupLines[] = "{$number}. {$group->name}";
         }
-        $message .= 'Tuma namba ya mchezo.';
         $this->flowSessions->startGroupAction($user, 'choose_edit_group', [
             'edit_group_ids' => $groupIds,
         ]);
-        $this->whatsapp->sendText($user, $message);
+        $this->whatsapp->sendText($user, $this->messages->render('group_edit_select', ['groups' => implode("\n", $groupLines)]));
     }
 
     private function startFinancialReportFlow(User $user): void
@@ -851,13 +847,11 @@ class WhatsappConversationService
         $this->flowSessions->startFinancialReport($user, [
             'group_ids' => $groups->pluck('id')->values()->all(),
         ]);
-        $lines = ['Chagua mchezo unaotaka kuona taarifa:'];
+        $lines = [];
         foreach ($groups as $index => $group) {
             $lines[] = ($index + 1).". {$group->name}";
         }
-        $lines[] = '';
-        $lines[] = 'Tuma namba ya mchezo.';
-        $this->whatsapp->sendText($user, implode("\n", $lines));
+        $this->whatsapp->sendText($user, $this->messages->render('report_start', ['groups' => implode("\n", $lines)]));
     }
 
     /** @param array<string, mixed> $message */
@@ -1190,7 +1184,7 @@ class WhatsappConversationService
     private function startPaymentFlow(User $user): void
     {
         $this->flowSessions->startPayment($user);
-        $this->whatsapp->sendText($user, "Unalipia nani?\n1. Mimi\n2. Mtu mwingine\n\nTuma 1 au 2.");
+        $this->whatsapp->sendText($user, $this->messages->render('payment_start', []));
     }
 
     private function startPayoutFlow(User $user): void
@@ -1210,14 +1204,17 @@ class WhatsappConversationService
             ->first();
 
         if (! $payout) {
-            $this->whatsapp->sendText($user, 'Hakuna malipo ya kupokea yaliyo tayari kwa sasa. Tutakutumia ujumbe siku yako ya kupokea ikifika.');
+            $this->whatsapp->sendText($user, $this->messages->render('payout_unavailable', []));
 
             return;
         }
 
         $this->flowSessions->startPayout($user, ['payout_id' => $payout->id]);
         $label = $payout->isCoordinatorFee() ? 'ada yako ya Kijumbe' : 'marejesho yako';
-        $this->whatsapp->sendText($user, 'Tuma namba ya simu utakayotumia kupokea '.$label.' ya TZS '.number_format((int) $payout->amount).'. Mfano 0748281701. Tuma KATISHA ukitaka kuacha.');
+        $this->whatsapp->sendText($user, $this->messages->render('payout_phone_prompt', [
+            'payout_label' => $label,
+            'amount' => number_format((int) $payout->amount),
+        ]));
     }
 
     /** @param array<string, mixed> $message */
@@ -1368,9 +1365,10 @@ class WhatsappConversationService
     {
         $step = $user->hasPayoutPin() ? 'await_old_pin' : 'await_new_pin';
         $this->flowSessions->startPinManagement($user, $step);
-        $this->whatsapp->sendText($user, $user->hasPayoutPin()
-            ? 'Tuma namba yako ya siri ya sasa ili kuibadilisha.'
-            : 'Hujaweka namba ya siri. Tuma namba mpya ya tarakimu 4 hadi 6.');
+        $this->whatsapp->sendText($user, $this->messages->render(
+            $user->hasPayoutPin() ? 'pin_existing_start' : 'pin_new_start',
+            [],
+        ));
     }
 
     /** @param array<string, mixed> $message */

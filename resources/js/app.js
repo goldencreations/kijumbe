@@ -51,6 +51,18 @@ if (document.body.dataset.page === 'payouts' && document.querySelector('.badge-p
 document.querySelectorAll('[data-auto-submit]').forEach(el => el.addEventListener('change', () => el.form.requestSubmit()));
 document.querySelectorAll('[data-open-dialog]').forEach(button => button.addEventListener('click', () => document.getElementById(button.dataset.openDialog)?.showModal()));
 document.querySelectorAll('[data-close-dialog]').forEach(button => button.addEventListener('click', () => button.closest('dialog').close()));
+const syncTemplateEditor = editor => {
+    const input = editor.closest('form')?.querySelector('[data-template-input]');
+    if (!input) return;
+    input.value = [...editor.children].map(child => {
+        if (child.matches('[data-template-token]')) return child.dataset.templateToken;
+        return child.innerText.replace(/\u00a0/g, '');
+    }).join('').replace(/\r\n/g, '\n');
+};
+document.querySelectorAll('[data-template-editor]').forEach(editor => {
+    editor.querySelectorAll('[data-template-text]').forEach(text => text.addEventListener('input', () => syncTemplateEditor(editor)));
+    syncTemplateEditor(editor);
+});
 document.querySelectorAll('[data-toggle-password]').forEach(button => button.addEventListener('click', () => {
     const input = document.getElementById(button.dataset.togglePassword);
     input.type = input.type === 'password' ? 'text' : 'password';

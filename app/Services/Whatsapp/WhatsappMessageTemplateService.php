@@ -11,7 +11,7 @@ class WhatsappMessageTemplateService
     /** @var array<string, string> */
     private array $resolvedBodies = [];
 
-    /** @return array<string, array{name: string, description: string, body: string, variables: array<int, string>}> */
+    /** @return array<string, array{category: string, name: string, description: string, body: string, variables: array<int, string>}> */
     public function definitions(): array
     {
         return config('whatsapp_messages', []);
@@ -74,5 +74,14 @@ class WhatsappMessageTemplateService
         preg_match_all('/\{([a-z0-9_]+)\}/i', $body, $matches);
 
         return array_values(array_diff(array_unique($matches[1] ?? []), $this->definition($key)['variables']));
+    }
+
+    /** @return array<int, string> */
+    public function missingVariables(string $key, string $body): array
+    {
+        preg_match_all('/\{([a-z0-9_]+)\}/i', $body, $matches);
+        $present = array_unique($matches[1] ?? []);
+
+        return array_values(array_diff($this->definition($key)['variables'], $present));
     }
 }

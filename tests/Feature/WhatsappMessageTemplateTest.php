@@ -26,9 +26,12 @@ class WhatsappMessageTemplateTest extends TestCase
         $this->get('/admin/whatsapp/message-templates')
             ->assertOk()
             ->assertSee('Contribution reminder')
+            ->assertSee('Main menu')
+            ->assertSee('Create group start')
+            ->assertSee('BADILI TAARIFA - Badili mchezo unaoratibu')
             ->assertSee('{group_name}');
 
-        $body = 'Habari, deni la {group_name} ni TZS {contribution_due}.';
+        $body = 'Habari, deni la {group_name} ni TZS {contribution_due}{penalty_notice} {deadline_notice}.';
         $this->putJson('/admin/actions/whatsapp/message-templates/contribution_reminder', ['body' => $body])
             ->assertOk()
             ->assertJsonPath('data.key', 'contribution_reminder');
@@ -39,7 +42,7 @@ class WhatsappMessageTemplateTest extends TestCase
             'updated_by' => $admin->id,
         ]);
         $this->assertSame(
-            'Habari, deni la Upendo ni TZS 12,000.',
+            'Habari, deni la Upendo ni TZS 12,000 .',
             app(WhatsappMessageTemplateService::class)->render('contribution_reminder', [
                 'group_name' => 'Upendo',
                 'contribution_due' => '12,000',
@@ -66,6 +69,17 @@ class WhatsappMessageTemplateTest extends TestCase
         ])->assertUnprocessable()->assertJsonValidationErrors('body');
 
         $this->assertDatabaseCount('whatsapp_message_templates', 0);
+    }
+
+    public function test_required_template_variables_cannot_be_removed(): void
+    {
+        $this->actingAs(User::factory()->create(['system_role' => SystemRole::Admin]));
+
+        $this->putJson('/admin/actions/whatsapp/message-templates/status_due', [
+            'body' => 'Mchango unaosubiri.',
+        ])->assertUnprocessable()->assertJsonValidationErrors('body');
+
+        $this->assertDatabaseMissing('whatsapp_message_templates', ['key' => 'status_due']);
     }
 
     public function test_non_admin_cannot_manage_message_templates(): void

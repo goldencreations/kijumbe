@@ -32,6 +32,12 @@ class AdminWhatsappMessageTemplateController extends Controller
                 'body' => 'Unknown variable(s): '.implode(', ', array_map(fn (string $name): string => '{'.$name.'}', $unknown)).'.',
             ]);
         }
+        $missing = $templates->missingVariables($key, $data['body']);
+        if ($missing !== []) {
+            throw ValidationException::withMessages([
+                'body' => 'Required variable(s) cannot be removed: '.implode(', ', array_map(fn (string $name): string => '{'.$name.'}', $missing)).'.',
+            ]);
+        }
 
         $template = WhatsappMessageTemplate::query()->firstOrNew(['key' => $key]);
         $before = $template->exists ? $template->attributesToArray() : ['body' => $definition['body']];
