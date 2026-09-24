@@ -59,7 +59,27 @@ const syncTemplateEditor = editor => {
         return node.textContent.replace(/\u00a0/g, '');
     }).join('').replace(/\r\n/g, '\n');
 };
+const renderTemplateEditor = editor => {
+    const input = editor.closest('form')?.querySelector('[data-template-input]');
+    if (!input) return;
+    const fragment = document.createDocumentFragment();
+    const parts = input.value.split(/(\{[a-z0-9_]+\})/gi);
+    parts.forEach(part => {
+        if (/^\{[a-z0-9_]+\}$/i.test(part)) {
+            const token = document.createElement('code');
+            token.className = 'template-token';
+            token.dataset.templateToken = part;
+            token.contentEditable = 'false';
+            token.textContent = part;
+            fragment.append(token);
+        } else if (part !== '') {
+            fragment.append(document.createTextNode(part));
+        }
+    });
+    editor.replaceChildren(fragment);
+};
 document.querySelectorAll('[data-template-editor]').forEach(editor => {
+    renderTemplateEditor(editor);
     editor.addEventListener('input', () => syncTemplateEditor(editor));
     editor.addEventListener('beforeinput', event => {
         if (!event.inputType.startsWith('delete')) return;
