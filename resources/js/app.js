@@ -51,65 +51,108 @@ if (document.body.dataset.page === 'payouts' && document.querySelector('.badge-p
 document.querySelectorAll('[data-auto-submit]').forEach(el => el.addEventListener('change', () => el.form.requestSubmit()));
 document.querySelectorAll('[data-open-dialog]').forEach(button => button.addEventListener('click', () => document.getElementById(button.dataset.openDialog)?.showModal()));
 document.querySelectorAll('[data-close-dialog]').forEach(button => button.addEventListener('click', () => button.closest('dialog').close()));
-const syncTemplateEditor = editor => {
-    const input = editor.closest('form')?.querySelector('[data-template-input]');
-    if (!input) return;
-    input.value = [...editor.childNodes].map(node => {
-        if (node.nodeType === Node.ELEMENT_NODE && node.matches('[data-template-token]')) return node.dataset.templateToken;
-        return node.textContent.replace(/\u00a0/g, '');
-    }).join('').replace(/\r\n/g, '\n');
+const templateToken = value => {
+    const token = document.createElement('code');
+    token.className = 'template-token';
+    token.dataset.templateToken = value;
+    token.contentEditable = 'false';
+    token.textContent = value;
+    return token;
+};
+const renderTemplateInline = value => {
+    const fragment = document.createDocumentFragment();
+    const pattern = /(\{[a-z0-9_]+\})|```([^`\n]+)```|\*([^*\n]+)\*|_([^_\n]+)_/gi;
+    let cursor = 0;
+    for (const match of value.matchAll(pattern)) {
+        if (match.index > cursor) fragment.append(document.createTextNode(value.slice(cursor, match.index)));
+        if (match[1]) fragment.append(templateToken(match[1]));
+        else {
+            const formatted = document.createElement(match[2] ? 'code' : match[3] ? 'strong' : 'em');
+            if (match[2]) formatted.className = 'template-format-monospace';
+            formatted.textContent = match[2] || match[3] || match[4];
+            fragment.append(formatted);
+        }
+        cursor = match.index + match[0].length;
+    }
+    if (cursor < value.length) fragment.append(document.createTextNode(value.slice(cursor)));
+    return fragment;
 };
 const renderTemplateEditor = editor => {
     const input = editor.closest('form')?.querySelector('[data-template-input]');
     if (!input) return;
     const fragment = document.createDocumentFragment();
-    const parts = input.value.split(/(\{[a-z0-9_]+\})/gi);
-    parts.forEach(part => {
-        if (/^\{[a-z0-9_]+\}$/i.test(part)) {
-            const token = document.createElement('code');
-            token.className = 'template-token';
-            token.dataset.templateToken = part;
-            token.contentEditable = 'false';
-            token.textContent = part;
-            fragment.append(token);
-        } else if (part !== '') {
-            fragment.append(document.createTextNode(part));
-        }
+    input.value.split('\n').forEach(line => {
+        const quote = line.startsWith('> ');
+        const bullet = /^[-*] /.test(line);
+        const block = document.createElement(quote ? 'blockquote' : 'div');
+        if (bullet) block.dataset.templateBullet = 'true';
+        block.append(renderTemplateInline(line.replace(quote ? /^> / : bullet ? /^[-*] / : /^/, '')));
+        fragment.append(block);
     });
     editor.replaceChildren(fragment);
 };
-const templateSelectionInside = (editor, range) => range
-    && editor.contains(range.commonAncestorContainer)
-    && ![...editor.querySelectorAll('[data-template-token]')].some(token => range.intersectsNode(token));
-const templateFormat = (editor, format) => {
+const serializeTemplateNode = node => {
+    if (node.nodeType === Node.TEXT_NODE) return node.textContent.replace(/\u00a0/g, '');
+    if (node.nodeType !== Node.ELEMENT_NODE) return '';
+    if (node.matches('[data-template-token]')) return node.dataset.templateToken;
+    const content = [...node.childNodes].map(serializeTemplateNode).join('');
+    if (node.matches('strong,b')) return `*${content}*`;
+    if (node.matches('em,i')) return `_${content}_`;
+    if (node.matches('.template-format-monospace,[face="monospace"]')) return `\`\`\`${content}\`\`\``;
+    if (node.matches('blockquote')) return `> ${content}`;
+    if (node.matches('[data-template-bullet]')) return `- ${content}`;
+    if (node.matches('br')) return '\n';
+    return content;
+};
+const syncTemplateEditor = editor => {
+    const input = editor.closest('form')?.querySelector('[data-template-input]');
+    if (!input) return;
+    input.value = [...editor.children].map(serializeTemplateNode).join('\n').replace(/\r\n/g, '\n');
+};
+const templateFormat = (editor, format, button) => {
+    if (!editor) return;
     editor.focus();
+    const command = format === 'bullet' ? 'insertUnorderedList' : format === 'quote' ? 'formatBlock' : format === 'monospace' ? 'fontName' : format;
     const selection = window.getSelection();
     const range = selection?.rangeCount ? selection.getRangeAt(0) : null;
-    if (!templateSelectionInside(editor, range)) return;
-
-    const markers = { bold: ['*', '*'], italic: ['_', '_'], monospace: ['```', '```'] };
-    const selected = range.toString();
-    let replacement;
-    let caretOffset;
-    if (format === 'quote' || format === 'bullet') {
-        const prefix = format === 'quote' ? '> ' : '- ';
-        replacement = (selected || '').split('\n').map(line => line ? `${prefix}${line}` : prefix.trimEnd()).join('\n');
-        if (!selected) replacement = prefix;
-        caretOffset = replacement.length;
-    } else {
-        const [opening, closing] = markers[format];
-        replacement = `${opening}${selected}${closing}`;
-        caretOffset = selected ? replacement.length : opening.length;
+    if (!range || !editor.contains(range.commonAncestorContainer)) return;
+    const tokenSelected = range && [...editor.querySelectorAll('[data-template-token]')].some(token => range.intersectsNode(token));
+    if (tokenSelected && !range.collapsed && ['bold', 'italic', 'monospace'].includes(format)) {
+        const token = [...editor.querySelectorAll('[data-template-token]')].find(candidate => range.intersectsNode(candidate));
+        const existing = token.parentElement?.matches('strong,em,.template-format-monospace');
+        const wrapper = format === 'bold' ? 'strong' : format === 'italic' ? 'em' : 'code';
+        if (existing && ((format === 'bold' && token.parentElement.matches('strong')) || (format === 'italic' && token.parentElement.matches('em')) || (format === 'monospace' && token.parentElement.matches('.template-format-monospace')))) {
+            token.parentElement.replaceWith(token);
+        } else {
+            const formatted = document.createElement(wrapper);
+            if (format === 'monospace') formatted.className = 'template-format-monospace';
+            token.replaceWith(formatted);
+            formatted.append(token);
+        }
+        syncTemplateEditor(editor);
+        button.classList.toggle('is-active', !existing);
+        button.setAttribute('aria-pressed', String(!existing));
+        return;
     }
-
-    range.deleteContents();
-    const text = document.createTextNode(replacement);
-    range.insertNode(text);
-    range.setStart(text, caretOffset);
-    range.collapse(true);
-    selection.removeAllRanges();
-    selection.addRange(range);
+    if (tokenSelected && !range.collapsed) return;
+    if (format === 'quote') {
+        const blockquote = range?.commonAncestorContainer.nodeType === Node.ELEMENT_NODE
+            ? range.commonAncestorContainer.closest?.('blockquote')
+            : range?.commonAncestorContainer.parentElement?.closest('blockquote');
+        document.execCommand(command, false, blockquote ? 'div' : 'blockquote');
+    } else if (format === 'monospace') {
+        document.execCommand(command, false, 'monospace');
+    } else {
+        document.execCommand(command, false, null);
+    }
     syncTemplateEditor(editor);
+    const active = format === 'quote'
+        ? Boolean(editor.querySelector('blockquote:focus, blockquote')) && Boolean(window.getSelection()?.anchorNode?.parentElement?.closest('blockquote'))
+        : format === 'monospace'
+            ? Boolean(window.getSelection()?.anchorNode?.parentElement?.closest('[face="monospace"],.template-format-monospace'))
+            : document.queryCommandState(command);
+    button.classList.toggle('is-active', active);
+    button.setAttribute('aria-pressed', String(active));
 };
 document.querySelectorAll('[data-template-editor]').forEach(editor => {
     renderTemplateEditor(editor);
@@ -128,7 +171,8 @@ document.querySelectorAll('[data-template-toolbar]').forEach(toolbar => {
     const editor = toolbar.closest('form')?.querySelector('[data-template-editor]');
     toolbar.querySelectorAll('[data-template-format]').forEach(button => {
         button.addEventListener('mousedown', event => event.preventDefault());
-        button.addEventListener('click', () => templateFormat(editor, button.dataset.templateFormat));
+        button.setAttribute('aria-pressed', 'false');
+        button.addEventListener('click', () => templateFormat(editor, button.dataset.templateFormat, button));
     });
 });
 document.querySelectorAll('[data-toggle-password]').forEach(button => button.addEventListener('click', () => {
