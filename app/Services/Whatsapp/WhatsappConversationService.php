@@ -11,6 +11,7 @@ use App\Models\MemberPaymentObligation;
 use App\Models\Payout;
 use App\Models\User;
 use App\Models\WhatsappFlowSession;
+use App\Models\WhatsappMessage;
 use App\Services\DailyContributionService;
 use App\Services\GroupFinancialReportService;
 use App\Services\MemberPaymentLedgerService;
@@ -49,7 +50,7 @@ class WhatsappConversationService
 
         if ($command === 'START') {
             $user->update(['whatsapp_opted_in_at' => now(), 'whatsapp_opted_out_at' => null]);
-            $this->whatsapp->sendText($user, $this->mainMenuMessage());
+            $this->sendTemplateMessage($user, 'main_menu');
 
             return;
         }
@@ -67,7 +68,7 @@ class WhatsappConversationService
 
         if (in_array($command, ['KATISHA', 'ACHA'], true)) {
             $this->flowSessions->cancelActive($user);
-            $this->whatsapp->sendText($user, $this->messages->render('flow_cancelled', ['main_menu' => $this->mainMenuMessage()]));
+            $this->sendTemplateMessage($user, 'flow_cancelled', ['main_menu' => $this->mainMenuMessage()]);
 
             return;
         }
@@ -151,18 +152,18 @@ class WhatsappConversationService
 
         if ($command === 'STATUS') {
             if (! $contribution) {
-                $this->whatsapp->sendText($user, $this->messages->render('status_clear', []));
+                $this->sendTemplateMessage($user, 'status_clear');
             } else {
-                $this->whatsapp->sendText($user, $this->messages->render('status_due', [
+                $this->sendTemplateMessage($user, 'status_due', [
                     'amount' => number_format((int) $contribution->amount),
                     'deadline' => $contribution->due_at->timezone('Africa/Dar_es_Salaam')->format('d M Y H:i'),
-                ]));
+                ]);
             }
 
             return;
         }
 
-        $this->whatsapp->sendText($user, $this->mainMenuMessage());
+        $this->sendTemplateMessage($user, 'main_menu');
     }
 
     /** @param array<string, mixed> $message */
@@ -172,7 +173,7 @@ class WhatsappConversationService
 
         if (in_array($command, ['KATISHA', 'ACHA'], true)) {
             $this->flowSessions->cancelActive($user);
-            $this->whatsapp->sendText($user, $this->messages->render('flow_cancelled', ['main_menu' => $this->mainMenuMessage()]));
+            $this->sendTemplateMessage($user, 'flow_cancelled', ['main_menu' => $this->mainMenuMessage()]);
 
             return true;
         }
@@ -218,7 +219,7 @@ class WhatsappConversationService
             $session = $this->flowSessions->startGroupCreation($user, [
                 'last_message_id' => $messageId,
             ]);
-            $this->whatsapp->sendText($user, $this->messages->render('group_creation_start', []));
+            $this->sendTemplateMessage($user, 'group_creation_start');
         } else {
             $this->whatsapp->sendText($user, 'Tunaendelea na uundaji wa kikundi chako.');
         }
@@ -427,7 +428,7 @@ class WhatsappConversationService
             }
         }
 
-        $this->whatsapp->sendText($user, $this->mainMenuMessage());
+        $this->sendTemplateMessage($user, 'main_menu');
         $this->flowSessions->startGroupAction($user, 'await_group_code', []);
 
         return true;
@@ -795,6 +796,17 @@ class WhatsappConversationService
         return $this->messages->render('main_menu', []);
     }
 
+    /** @param array<string, scalar|null> $variables */
+    private function sendTemplateMessage(User $user, string $key, array $variables = []): WhatsappMessage
+    {
+        $body = $this->messages->render($key, $variables);
+        $interaction = $this->messages->interaction($key, $variables);
+
+        return $interaction
+            ? $this->whatsapp->sendInteractive($user, $body, $interaction)
+            : $this->whatsapp->sendText($user, $body);
+    }
+
     private function startGroupEditFlow(User $user): void
     {
         $groups = $this->financialReports->coordinatorGroups($user)
@@ -814,10 +826,10 @@ class WhatsappConversationService
                 'group_id' => $group->id,
                 'group_code' => $group->group_code ?: $group->id,
             ]);
-            $this->whatsapp->sendText($user, $this->messages->render('group_edit_start', [
+            $this->sendTemplateMessage($user, 'group_edit_start', [
                 'group_name' => $group->name,
                 'edit_menu' => $this->groupEditMenu(),
-            ]));
+            ]);
 
             return;
         }
@@ -832,7 +844,7 @@ class WhatsappConversationService
         $this->flowSessions->startGroupAction($user, 'choose_edit_group', [
             'edit_group_ids' => $groupIds,
         ]);
-        $this->whatsapp->sendText($user, $this->messages->render('group_edit_select', ['groups' => implode("\n", $groupLines)]));
+        $this->sendTemplateMessage($user, 'group_edit_select', ['groups' => implode("\n", $groupLines)]);
     }
 
     private function startFinancialReportFlow(User $user): void
@@ -851,7 +863,7 @@ class WhatsappConversationService
         foreach ($groups as $index => $group) {
             $lines[] = ($index + 1).". {$group->name}";
         }
-        $this->whatsapp->sendText($user, $this->messages->render('report_start', ['groups' => implode("\n", $lines)]));
+        $this->sendTemplateMessage($user, 'report_start', ['groups' => implode("\n", $lines)]);
     }
 
     /** @param array<string, mixed> $message */
@@ -1184,7 +1196,7 @@ class WhatsappConversationService
     private function startPaymentFlow(User $user): void
     {
         $this->flowSessions->startPayment($user);
-        $this->whatsapp->sendText($user, $this->messages->render('payment_start', []));
+        $this->sendTemplateMessage($user, 'payment_start');
     }
 
     private function startPayoutFlow(User $user): void
@@ -1204,17 +1216,17 @@ class WhatsappConversationService
             ->first();
 
         if (! $payout) {
-            $this->whatsapp->sendText($user, $this->messages->render('payout_unavailable', []));
+            $this->sendTemplateMessage($user, 'payout_unavailable');
 
             return;
         }
 
         $this->flowSessions->startPayout($user, ['payout_id' => $payout->id]);
         $label = $payout->isCoordinatorFee() ? 'ada yako ya Kijumbe' : 'marejesho yako';
-        $this->whatsapp->sendText($user, $this->messages->render('payout_phone_prompt', [
+        $this->sendTemplateMessage($user, 'payout_phone_prompt', [
             'payout_label' => $label,
             'amount' => number_format((int) $payout->amount),
-        ]));
+        ]);
     }
 
     /** @param array<string, mixed> $message */
@@ -1365,10 +1377,10 @@ class WhatsappConversationService
     {
         $step = $user->hasPayoutPin() ? 'await_old_pin' : 'await_new_pin';
         $this->flowSessions->startPinManagement($user, $step);
-        $this->whatsapp->sendText($user, $this->messages->render(
+        $this->sendTemplateMessage($user,
             $user->hasPayoutPin() ? 'pin_existing_start' : 'pin_new_start',
             [],
-        ));
+        );
     }
 
     /** @param array<string, mixed> $message */

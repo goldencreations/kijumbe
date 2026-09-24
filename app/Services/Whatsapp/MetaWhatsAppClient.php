@@ -21,6 +21,44 @@ class MetaWhatsAppClient
         ]);
     }
 
+    /** @param array<string, mixed> $interaction */
+    public function sendInteractive(User $user, string $text, array $interaction): WhatsappMessage
+    {
+        $type = $interaction['type'] ?? null;
+        $options = $interaction['options'] ?? [];
+
+        if ($type === 'buttons') {
+            $interactive = [
+                'type' => 'button',
+                'body' => ['text' => $text],
+                'action' => ['buttons' => array_map(static fn (array $option): array => [
+                    'type' => 'reply',
+                    'reply' => ['id' => $option['id'], 'title' => $option['title']],
+                ], $options)],
+            ];
+        } elseif ($type === 'list') {
+            $rows = array_map(static function (array $option): array {
+                return array_filter([
+                    'id' => $option['id'],
+                    'title' => $option['title'],
+                    'description' => $option['description'] ?? null,
+                ], static fn ($value): bool => $value !== null && $value !== '');
+            }, $options);
+            $interactive = [
+                'type' => 'list',
+                'body' => ['text' => $text],
+                'action' => [
+                    'button' => $interaction['button_text'],
+                    'sections' => [['title' => 'Chaguo', 'rows' => $rows]],
+                ],
+            ];
+        } else {
+            throw new RuntimeException('Unsupported WhatsApp interaction type.');
+        }
+
+        return $this->send($user, 'interactive', ['type' => 'interactive', 'interactive' => $interactive]);
+    }
+
     /** @param array<int, array<string, mixed>> $components */
     public function sendTemplate(User $user, string $name, string $language, array $components = []): WhatsappMessage
     {

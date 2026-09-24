@@ -7,7 +7,12 @@ use Illuminate\Database\Eloquent\Relations\BelongsTo;
 
 class WhatsappMessageTemplate extends Model
 {
-    protected $fillable = ['key', 'body', 'updated_by'];
+    protected $fillable = ['key', 'body', 'interaction', 'updated_by'];
+
+    protected function casts(): array
+    {
+        return ['interaction' => 'array'];
+    }
 
     public function editor(): BelongsTo
     {

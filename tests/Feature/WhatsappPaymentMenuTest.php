@@ -42,7 +42,16 @@ class WhatsappPaymentMenuTest extends TestCase
 
         $messages = [];
         $whatsapp = Mockery::mock(MetaWhatsAppClient::class);
-        $whatsapp->shouldReceive('sendText')->twice()->andReturnUsing(
+        $whatsapp->shouldReceive('sendInteractive')->once()->andReturnUsing(
+            function (User $recipient, string $text, array $interaction) use (&$messages): WhatsappMessage {
+                $messages[] = $text;
+                $this->assertSame('buttons', $interaction['type']);
+                $this->assertSame(['1', '2'], array_column($interaction['options'], 'id'));
+
+                return new WhatsappMessage;
+            },
+        );
+        $whatsapp->shouldReceive('sendText')->once()->andReturnUsing(
             function (User $recipient, string $text) use (&$messages): WhatsappMessage {
                 $messages[] = $text;
 

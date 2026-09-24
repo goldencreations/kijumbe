@@ -201,6 +201,83 @@ document.querySelectorAll('[data-template-toolbar]').forEach(toolbar => {
         button.addEventListener('click', () => templateFormat(editor, button.dataset.templateFormat, button));
     });
 });
+document.querySelectorAll('[data-interaction-editor]').forEach(editor => {
+    const type = editor.querySelector('[data-interaction-type]');
+    const settings = editor.querySelector('[data-interaction-settings]');
+    const listButtonField = editor.querySelector('[data-list-button-field]');
+    const listButtonInput = listButtonField.querySelector('input');
+    const optionsContainer = editor.querySelector('[data-interaction-options]');
+    const optionsInput = editor.querySelector('[data-interaction-options-input]');
+    const addButton = editor.querySelector('[data-add-interaction-option]');
+    const limitText = editor.querySelector('[data-interaction-limit]');
+    let options = JSON.parse(optionsInput.value || '[]');
+
+    const sync = () => {
+        options = [...optionsContainer.querySelectorAll('[data-interaction-option]')].map(row => ({
+            id: row.querySelector('[data-option-id]').value,
+            title: row.querySelector('[data-option-title]').value,
+            description: row.querySelector('[data-option-description]').value,
+        }));
+        optionsInput.value = JSON.stringify(options);
+    };
+    const addOption = (option = {}) => {
+        const row = document.createElement('div');
+        row.className = 'interaction-option';
+        row.dataset.interactionOption = '';
+        const makeInput = (attribute, placeholder, value, maxLength) => {
+            const input = document.createElement('input');
+            input.dataset[attribute] = '';
+            input.placeholder = placeholder;
+            input.value = value || '';
+            input.maxLength = maxLength;
+            input.required = true;
+            input.addEventListener('input', sync);
+            return input;
+        };
+        row.append(
+            makeInput('optionTitle', 'Button or row title', option.title, type.value === 'buttons' ? 20 : 24),
+            makeInput('optionId', 'Reply / command ID', option.id, 256),
+            makeInput('optionDescription', 'Description (optional)', option.description, 72),
+        );
+        row.lastElementChild.required = false;
+        const remove = document.createElement('button');
+        remove.type = 'button';
+        remove.className = 'icon-button';
+        remove.title = 'Remove choice';
+        remove.setAttribute('aria-label', 'Remove choice');
+        remove.innerHTML = '<i data-lucide="trash-2"></i>';
+        remove.addEventListener('click', () => { row.remove(); sync(); update(); });
+        row.append(remove);
+        optionsContainer.append(row);
+        createIcons({ icons: { Trash2 } });
+    };
+    const render = () => {
+        optionsContainer.replaceChildren();
+        options.forEach(addOption);
+        sync();
+    };
+    const update = () => {
+        const enabled = type.value !== 'none';
+        const maximum = type.value === 'buttons' ? 3 : 10;
+        settings.hidden = !enabled;
+        listButtonField.hidden = type.value !== 'list';
+        listButtonInput.disabled = type.value !== 'list';
+        optionsContainer.querySelectorAll('input').forEach(input => { input.disabled = !enabled; });
+        addButton.disabled = !enabled || optionsContainer.children.length >= maximum;
+        limitText.textContent = type.value === 'buttons'
+            ? 'Use 1 to 3 choices. Button titles can contain up to 20 characters.'
+            : 'Use 1 to 10 choices. The action ID is the command Kijumbe receives.';
+        optionsContainer.querySelectorAll('[data-option-title]').forEach(input => { input.maxLength = type.value === 'buttons' ? 20 : 24; });
+    };
+    addButton.addEventListener('click', () => { addOption(); sync(); update(); });
+    type.addEventListener('change', () => {
+        if (type.value !== 'none' && optionsContainer.children.length === 0) addOption();
+        sync();
+        update();
+    });
+    render();
+    update();
+});
 document.querySelectorAll('[data-toggle-password]').forEach(button => button.addEventListener('click', () => {
     const input = document.getElementById(button.dataset.togglePassword);
     input.type = input.type === 'password' ? 'text' : 'password';

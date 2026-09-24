@@ -196,7 +196,7 @@ class PayoutService
             return;
         }
 
-        $message = $this->messages->render('payout_completed', [
+        $variables = [
             'group_name' => $group->name,
             'recipient_name' => $recipient->name,
             'gross_amount' => number_format((int) ($payout->gross_amount ?: $payout->amount)),
@@ -204,7 +204,9 @@ class PayoutService
             'amount' => number_format((int) $payout->amount),
             'round_number' => $payout->round?->number ?? '-',
             'paid_at' => ($payout->processed_at ?: now())->format('d/m/Y H:i'),
-        ]);
+        ];
+        $message = $this->messages->render('payout_completed', $variables);
+        $interaction = $this->messages->interaction('payout_completed', $variables);
 
         $members = User::query()
             ->whereKeyNot($recipient->id)
@@ -218,7 +220,9 @@ class PayoutService
 
         foreach ($members as $member) {
             try {
-                $this->whatsapp->sendText($member, $message);
+                $interaction
+                    ? $this->whatsapp->sendInteractive($member, $message, $interaction)
+                    : $this->whatsapp->sendText($member, $message);
             } catch (\Throwable $exception) {
                 Log::warning('Payout completed but group member WhatsApp notification failed.', [
                     'payout_id' => $payout->id,

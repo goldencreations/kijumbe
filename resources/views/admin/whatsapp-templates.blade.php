@@ -14,6 +14,9 @@
                 <div class="heading-actions"><span class="badge {{ $template['is_custom'] ? 'badge-active' : '' }}"><span></span>{{ $template['is_custom'] ? 'Customized' : 'Default' }}</span><button class="button secondary" data-open-dialog="edit-template-{{ $template['key'] }}"><i data-lucide="settings-2"></i>Edit</button>@if($template['is_custom'])<button class="icon-button" data-open-dialog="reset-template-{{ $template['key'] }}" title="Restore default" aria-label="Restore {{ $template['name'] }} default"><i data-lucide="rotate-ccw"></i></button>@endif</div>
             </div>
             <div class="template-body" data-template-preview>{{ $template['body'] }}</div>
+            @if(($template['interaction']['type'] ?? 'none') !== 'none')
+            <div class="template-interaction-preview"><span>{{ $template['interaction']['type'] === 'list' ? 'Dropdown list' : 'Reply buttons' }}</span><div>@foreach($template['interaction']['options'] as $option)<span class="interaction-chip">{{ $option['title'] }}</span>@endforeach</div></div>
+            @endif
             <div class="template-meta"><span>Live variables</span><div>@forelse($template['variables'] as $variable)<code>{<span>{{ $variable }}</span>}</code>@empty<small>None</small>@endforelse</div>@if($template['updated_at'])<small>Last changed {{ $template['updated_at']->timezone('Africa/Dar_es_Salaam')->format('d M Y, H:i') }} EAT{{ $template['updated_by'] ? ' by '.$template['updated_by'] : '' }}</small>@endif</div>
         </article>
 
@@ -41,6 +44,25 @@
                 <textarea name="body" data-template-input hidden maxlength="4000" required>{{ $template['body'] }}</textarea>
             </label>
             <p class="field-hint">WhatsApp formatting uses <code>*bold*</code>, <code>_italic_</code>, <code>```monospace```</code>, <code>&gt; quotes</code>, and <code>- bullets</code>. Values in code blocks are filled automatically when the message is sent.</p>
+            <div class="interaction-editor" data-interaction-editor>
+                <div class="interaction-heading"><div><strong>Member choices</strong><span>Add native WhatsApp buttons or a dropdown list below this message.</span></div></div>
+                <label class="field">Interaction type
+                    <select name="interaction_type" data-interaction-type>
+                        <option value="none" @selected(($template['interaction']['type'] ?? 'none') === 'none')>Plain text</option>
+                        <option value="buttons" @selected(($template['interaction']['type'] ?? 'none') === 'buttons')>Reply buttons</option>
+                        <option value="list" @selected(($template['interaction']['type'] ?? 'none') === 'list')>Dropdown list</option>
+                    </select>
+                </label>
+                <div data-interaction-settings>
+                    <label class="field" data-list-button-field>List button label
+                        <input name="interaction_button_text" value="{{ $template['interaction']['button_text'] ?? 'Chagua' }}" maxlength="20" placeholder="Chagua">
+                    </label>
+                    <div class="interaction-options-heading"><span>Choices</span><button type="button" class="button secondary" data-add-interaction-option><i data-lucide="plus"></i>Add choice</button></div>
+                    <div class="interaction-options" data-interaction-options></div>
+                    <input type="hidden" name="interaction_options" data-json data-interaction-options-input value="{{ json_encode($template['interaction']['options'] ?? []) }}">
+                    <p class="field-hint" data-interaction-limit></p>
+                </div>
+            </div>
         </x-dialog>
         @if($template['is_custom'])
         <x-dialog :id="'reset-template-'.$template['key']" :title="'Restore '.$template['name']" :action="url('/admin/actions/whatsapp/message-templates/'.$template['key'])" submit="Restore default">
@@ -52,5 +74,5 @@
         @endforeach
     @endforeach
 </div>
-<section class="template-boundary"><i data-lucide="shield-check"></i><div><h2>Interactive replies stay protected</h2><p>Menu prompts and replies such as NDIO, HAPANA, LIPA, and KATISHA remain managed by the bot so editing a notification cannot break a member journey.</p></div></section>
+<section class="template-boundary"><i data-lucide="shield-check"></i><div><h2>Interactive replies stay protected</h2><p>Button and list action IDs are delivered to the same command engine as typed replies. Keep each action ID equal to the reply the member would otherwise type.</p></div></section>
 @endsection

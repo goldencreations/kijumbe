@@ -67,15 +67,19 @@ class NotifyContributionReminders extends Command
                             ->sortBy('due_at')
                             ->first();
                         $deadline = $dueToday?->due_at?->timezone('Africa/Dar_es_Salaam')->format('H:i');
-                        $message = $messages->render('contribution_reminder', [
+                        $variables = [
                             'group_name' => $groupName,
                             'contribution_due' => number_format($contributionDue),
                             'penalty_notice' => $penaltyDue > 0 ? ' na '.number_format($penaltyDue).' ya fine ya kuchelewa.' : '.',
                             'deadline_notice' => $deadline ? "Mchango wa leo unatakiwa kabla ya {$deadline} EAT." : '',
-                        ]);
+                        ];
+                        $message = $messages->render('contribution_reminder', $variables);
+                        $interaction = $messages->interaction('contribution_reminder', $variables);
 
                         try {
-                            $whatsapp->sendText($user, $message);
+                            $interaction
+                                ? $whatsapp->sendInteractive($user, $message, $interaction)
+                                : $whatsapp->sendText($user, $message);
                             $sent++;
                         } catch (\Throwable $exception) {
                             Cache::forget($cacheKey);

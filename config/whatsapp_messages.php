@@ -22,6 +22,20 @@ Kwa kujiunga, kulipa, au kuona taarifa za mchezo, tuma msimbo wa mchezo.
 Kwa kujiunga au kuona taarifa za mchezo, tuma msimbo wa mchezo uliopokea.
 TEXT,
         'variables' => [],
+        'interaction' => [
+            'type' => 'list',
+            'button_text' => 'Chagua huduma',
+            'options' => [
+                ['id' => 'UNDA KIKUNDI', 'title' => 'Unda kikundi', 'description' => 'Unda mchezo mpya wa michango'],
+                ['id' => 'BADILI TAARIFA', 'title' => 'Badili taarifa', 'description' => 'Badili mchezo unaoratibu'],
+                ['id' => 'LIPA', 'title' => 'Lipa', 'description' => 'Lipa mchango'],
+                ['id' => 'POKEA', 'title' => 'Pokea', 'description' => 'Pokea marejesho'],
+                ['id' => 'NAMBA YA SIRI', 'title' => 'Namba ya siri', 'description' => 'Weka au badili namba ya siri'],
+                ['id' => 'STATUS', 'title' => 'Status', 'description' => 'Angalia mchango unaodaiwa'],
+                ['id' => 'TAARIFA', 'title' => 'Taarifa', 'description' => 'Angalia ripoti ya mchezo'],
+                ['id' => 'KATISHA', 'title' => 'Katisha', 'description' => 'Futa mchakato unaoendelea'],
+            ],
+        ],
     ],
     'flow_cancelled' => [
         'category' => 'Command menu', 'name' => 'Cancelled flow',
@@ -47,6 +61,13 @@ TEXT,
         'category' => 'Command menu', 'name' => 'Payment start',
         'description' => 'Shown when a member starts LIPA.',
         'body' => "Unalipia nani?\n1. Mimi\n2. Mtu mwingine\n\nTuma 1 au 2.", 'variables' => [],
+        'interaction' => [
+            'type' => 'buttons',
+            'options' => [
+                ['id' => '1', 'title' => 'Mimi'],
+                ['id' => '2', 'title' => 'Mtu mwingine'],
+            ],
+        ],
     ],
     'payout_unavailable' => [
         'category' => 'Command menu', 'name' => 'Payout unavailable',
