@@ -6,12 +6,11 @@ return [
         'description' => 'Sent once per day to members who still have an outstanding contribution.',
         'body' => <<<'TEXT'
 Ukumbusho wa mchango wa {group_name}.
-Mzunguko wa zamani zaidi ni {oldest_round}.
 Unadaiwa TZS {contribution_due}{penalty_notice}
 {deadline_notice}
 Tuma LIPA, chagua mchezo huu, thibitisha kiasi, kisha tuma namba ya simu ya kulipia.
 TEXT,
-        'variables' => ['group_name', 'oldest_round', 'contribution_due', 'penalty_notice', 'deadline_notice'],
+        'variables' => ['group_name', 'contribution_due', 'penalty_notice', 'deadline_notice'],
     ],
     'payment_debt_summary' => [
         'name' => 'Payment debt summary',
@@ -33,7 +32,7 @@ Mchezo: {group_name}
 Mpokeaji: {recipient_name}
 Jumla ya mchezo: TZS {gross_amount}
 Ada ya Kijumbe: TZS {kijumbe_fee_amount}
-Kiasi: TZS {amount}
+Kiasi alichopokea: TZS {amount}
 Mzunguko: {round_number}
 Muda: {paid_at} EAT
 

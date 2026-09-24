@@ -45,7 +45,6 @@ class NotifyContributionReminders extends Command
                             continue;
                         }
 
-                        $oldestRound = (int) $obligations->min('round_number');
                         $cacheKey = 'kijumbe:contribution-reminder:'.$user->id.':'.$group->id.':'.now()->toDateString();
                         if (! Cache::add($cacheKey, true, now()->endOfDay())) {
                             continue;
@@ -70,7 +69,6 @@ class NotifyContributionReminders extends Command
                         $deadline = $dueToday?->due_at?->timezone('Africa/Dar_es_Salaam')->format('H:i');
                         $message = $messages->render('contribution_reminder', [
                             'group_name' => $groupName,
-                            'oldest_round' => $oldestRound,
                             'contribution_due' => number_format($contributionDue),
                             'penalty_notice' => $penaltyDue > 0 ? ' na '.number_format($penaltyDue).' ya fine ya kuchelewa.' : '.',
                             'deadline_notice' => $deadline ? "Mchango wa leo unatakiwa kabla ya {$deadline} EAT." : '',

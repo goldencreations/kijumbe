@@ -340,7 +340,7 @@ class MichezoPayoutSyncServiceTest extends TestCase
         Carbon::setTestNow();
     }
 
-    public function test_confirmed_principal_creates_a_net_payout_after_deducting_kijumbe_fee(): void
+    public function test_confirmed_principal_creates_a_full_principal_payout_without_deducting_fees(): void
     {
         Carbon::setTestNow(Carbon::parse('2026-09-16 16:20:00', 'Africa/Dar_es_Salaam'));
         $users = User::factory()->count(2)->sequence(
@@ -424,10 +424,10 @@ class MichezoPayoutSyncServiceTest extends TestCase
         $this->assertSame(400, $round->required_amount);
         $this->assertSame(400, $round->collected_amount);
         $this->assertSame(400, $round->gross_payout_amount);
-        $this->assertSame(100, $round->kijumbe_fee_amount);
-        $this->assertSame(30, $round->platform_fee_amount);
-        $this->assertSame(70, $round->coordinator_fee_amount);
-        $this->assertSame(300, $round->payout_amount);
+        $this->assertSame(0, $round->kijumbe_fee_amount);
+        $this->assertSame(0, $round->platform_fee_amount);
+        $this->assertSame(0, $round->coordinator_fee_amount);
+        $this->assertSame(400, $round->payout_amount);
         $this->assertSame('2026-09-16 16:10:00', $round->due_at->format('Y-m-d H:i:s'));
         $this->assertSame($users[0]->id, $round->recipient->groupMember->user_id);
         $this->assertDatabaseCount('contributions', 2);
@@ -439,17 +439,17 @@ class MichezoPayoutSyncServiceTest extends TestCase
         $this->assertSame(0, Artisan::call('kijumbe:notify-due-payouts'));
         $this->assertDatabaseHas('payouts', [
             'round_id' => $round->id,
-            'amount' => 300,
+            'amount' => 400,
             'gross_amount' => 400,
-            'kijumbe_fee_amount' => 100,
-            'platform_fee_amount' => 30,
-            'coordinator_fee_amount' => 70,
+            'kijumbe_fee_amount' => 0,
+            'platform_fee_amount' => 0,
+            'coordinator_fee_amount' => 0,
             'status' => 'pending',
         ]);
         Carbon::setTestNow();
     }
 
-    public function test_four_names_contributing_ten_thousand_produce_a_thirty_six_thousand_net_payout(): void
+    public function test_four_names_contributing_ten_thousand_produce_a_forty_thousand_principal_payout(): void
     {
         Carbon::setTestNow(Carbon::parse('2026-09-20 09:00:00', 'Africa/Dar_es_Salaam'));
         $users = User::factory()->count(4)->sequence(
@@ -530,10 +530,10 @@ class MichezoPayoutSyncServiceTest extends TestCase
         $round = $group->cycles()->firstOrFail()->rounds()->firstOrFail();
 
         $this->assertSame(40000, $round->gross_payout_amount);
-        $this->assertSame(4000, $round->kijumbe_fee_amount);
-        $this->assertSame(1200, $round->platform_fee_amount);
-        $this->assertSame(2800, $round->coordinator_fee_amount);
-        $this->assertSame(36000, $round->payout_amount);
+        $this->assertSame(0, $round->kijumbe_fee_amount);
+        $this->assertSame(0, $round->platform_fee_amount);
+        $this->assertSame(0, $round->coordinator_fee_amount);
+        $this->assertSame(40000, $round->payout_amount);
         Carbon::setTestNow();
     }
 

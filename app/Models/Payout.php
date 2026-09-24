@@ -17,6 +17,8 @@ class Payout extends Model
 
     public const PURPOSE_COORDINATOR_FEE = 'coordinator_fee';
 
+    public const PURPOSE_MEMBER_ADJUSTMENT_PREFIX = 'member_adjustment_';
+
     protected $appends = ['destination_phone_local'];
 
     public function getDestinationPhoneLocalAttribute(): ?string
@@ -72,6 +74,11 @@ class Payout extends Model
     public function isCoordinatorFee(): bool
     {
         return $this->purpose === self::PURPOSE_COORDINATOR_FEE;
+    }
+
+    public function isMemberAdjustment(): bool
+    {
+        return str_starts_with((string) $this->purpose, self::PURPOSE_MEMBER_ADJUSTMENT_PREFIX);
     }
 
     public function processor(): BelongsTo

@@ -53,12 +53,12 @@ class CoordinatorFeePayoutTest extends TestCase
         $this->assertNotNull($first);
         $this->assertSame($first->id, $second?->id);
         $this->assertSame(Payout::PURPOSE_COORDINATOR_FEE, $first->purpose);
-        $this->assertSame(210, $first->amount);
+        $this->assertSame(140, $first->amount);
         $this->assertSame($coordinator->id, $first->recipient_user_id);
         $this->assertSame(PayoutStatus::Pending, $first->status);
         $this->assertNotNull($first->fresh()->ready_notified_at);
         $this->assertStringContainsString('ADA YAKO YA KIJUMBE IKO TAYARI', $readyMessage);
-        $this->assertStringContainsString('TZS 210', $readyMessage);
+        $this->assertStringContainsString('TZS 140', $readyMessage);
         $this->assertStringContainsString('POKEA ADA', $readyMessage);
         $this->assertDatabaseCount('payouts', 2);
 
@@ -75,7 +75,7 @@ class CoordinatorFeePayoutTest extends TestCase
             'text' => ['body' => 'POKEA ADA'],
         ]);
 
-        $this->assertStringContainsString('ada yako ya Kijumbe ya TZS 210', $flowMessage);
+        $this->assertStringContainsString('ada yako ya Kijumbe ya TZS 140', $flowMessage);
         $this->assertDatabaseHas('whatsapp_flow_sessions', [
             'user_id' => $coordinator->id,
             'flow_key' => 'payout',
@@ -115,7 +115,7 @@ class CoordinatorFeePayoutTest extends TestCase
         $this->assertNotNull($cycle->fresh()->completed_at);
         $this->assertStringContainsString('ADA YA KIJUMBE IMELIPWA', $paidMessage);
         $this->assertStringContainsString('Kijumbe: Derick', $paidMessage);
-        $this->assertStringContainsString('TZS 210', $paidMessage);
+        $this->assertStringContainsString('TZS 140', $paidMessage);
         Carbon::setTestNow();
     }
 
