@@ -129,6 +129,7 @@ class MichezoPayoutSyncService
 
                 $required = 0;
                 $collected = 0;
+                $legacyFeeCollected = 0;
                 $contributionState = [];
 
                 foreach ($slots as $slot) {
@@ -141,6 +142,7 @@ class MichezoPayoutSyncService
                         (int) $obligation->principal_amount,
                         (int) $successfulAllocations->sum('principal_amount'),
                     );
+                    $legacyFeeCollected += (int) $successfulAllocations->sum('kijumbe_fee_amount');
                     $required += (int) $obligation->principal_amount;
                     $collected += $principalPaid;
 
@@ -166,6 +168,11 @@ class MichezoPayoutSyncService
                 }
 
                 $fullyFunded = $required > 0 && $collected >= $required;
+                $configuredFee = max((int) ($group->kijumbe_fee ?? 0), 0) * $slots->count();
+                $deductedFee = max($configuredFee - min($legacyFeeCollected, $configuredFee), 0);
+                $platformPercent = (int) ($group->platform_fee_percent ?? config('kijumbe.platform_fee_percent', 30));
+                [$platformFee, $coordinatorFee] = Group::splitKijumbeFee($deductedFee, $platformPercent);
+                $netPayout = max($required - $deductedFee, 0);
                 $status = match (true) {
                     now()->lt($roundDueAt) => RoundStatus::Scheduled,
                     $fullyFunded => RoundStatus::ReadyForPayout,
@@ -179,8 +186,6 @@ class MichezoPayoutSyncService
                 ]);
                 $roundWasPaid = $round->exists && $round->status === RoundStatus::Paid;
                 $roundData = $roundWasPaid ? [
-                    'due_at' => $roundDueAt,
-                    'grace_ends_at' => $graceEndsAt,
                     'status' => RoundStatus::Paid,
                 ] : [
                     'recipient_cycle_member_id' => $recipient->id,
@@ -192,11 +197,11 @@ class MichezoPayoutSyncService
                 ];
                 if (! $roundWasPaid) {
                     $roundData += [
-                        'payout_amount' => $fullyFunded ? $required : 0,
+                        'payout_amount' => $fullyFunded ? $netPayout : 0,
                         'gross_payout_amount' => $required,
-                        'kijumbe_fee_amount' => 0,
-                        'platform_fee_amount' => 0,
-                        'coordinator_fee_amount' => 0,
+                        'kijumbe_fee_amount' => $deductedFee,
+                        'platform_fee_amount' => $platformFee,
+                        'coordinator_fee_amount' => $coordinatorFee,
                     ];
                 }
                 $round->fill($roundData)->save();

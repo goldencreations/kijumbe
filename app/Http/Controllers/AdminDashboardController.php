@@ -340,21 +340,11 @@ class AdminDashboardController extends Controller
             'group', 'members.groupMember.user', 'rounds.recipient.groupMember.user',
             'rounds.contributions.cycleMember.groupMember.user', 'rounds.contributions.paymentAttempts', 'rounds.payout', 'rounds.decisions.decider',
         ]);
-        $payoutAdjustments = Payout::query()
-            ->where('cycle_id', $cycle->id)
-            ->where('purpose', 'like', Payout::PURPOSE_MEMBER_ADJUSTMENT_PREFIX.'%')
-            ->get()
-            ->keyBy(fn (Payout $payout): int => (int) substr(
-                $payout->purpose,
-                strlen(Payout::PURPOSE_MEMBER_ADJUSTMENT_PREFIX),
-            ));
-
         return view('admin.cycle', [
             'page' => 'groups',
             'title' => $cycle->name,
             'cycle' => $cycle,
             'roundLedgerTotals' => $reports->cycleRoundLedgerTotals($cycle),
-            'payoutAdjustments' => $payoutAdjustments,
         ]);
     }
 }

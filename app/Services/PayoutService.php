@@ -125,8 +125,6 @@ class PayoutService
         if ($shouldNotify) {
             if ($completedPayout->isCoordinatorFee()) {
                 $this->notifyCoordinatorFeePaid($completedPayout);
-            } elseif ($completedPayout->isMemberAdjustment()) {
-                $this->notifyMemberAdjustmentPaid($completedPayout);
             } else {
                 $this->notifyOtherMembers($completedPayout);
                 if ($completedPayout->round?->cycle?->status === CycleStatus::Completed) {
@@ -136,32 +134,6 @@ class PayoutService
         }
 
         return $completedPayout;
-    }
-
-    private function notifyMemberAdjustmentPaid(Payout $payout): void
-    {
-        $payout->loadMissing('cycle.group', 'recipientUser');
-        $group = $payout->cycle?->group;
-        $recipient = $payout->recipientUser;
-        if (! $group || ! $recipient) {
-            return;
-        }
-
-        try {
-            $this->whatsapp->sendText(
-                $recipient,
-                "MAREKEBISHO YA MALIPO YAMELIPWA\n"
-                    ."Mchezo: {$group->name}\n"
-                    .'Kiasi: TZS '.number_format((int) $payout->amount)."\n"
-                    .'Muda: '.($payout->processed_at ?: now())->format('d/m/Y H:i')." EAT",
-            );
-        } catch (\Throwable $exception) {
-            Log::warning('Member payout adjustment completed but WhatsApp notification failed.', [
-                'payout_id' => $payout->id,
-                'recipient_user_id' => $recipient->id,
-                'error' => $exception->getMessage(),
-            ]);
-        }
     }
 
     /** @param array<string, mixed> $payload */

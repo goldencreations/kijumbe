@@ -1200,7 +1200,6 @@ class WhatsappConversationService
             ->whereIn('status', ['pending', 'approved'])
             ->where(function ($query): void {
                 $query->where('purpose', Payout::PURPOSE_COORDINATOR_FEE)
-                    ->orWhere('purpose', 'like', Payout::PURPOSE_MEMBER_ADJUSTMENT_PREFIX.'%')
                     ->orWhereHas('round', fn ($query) => $query->where('status', 'ready_for_payout'));
             })
             ->where(function ($query) use ($user): void {
@@ -1217,11 +1216,7 @@ class WhatsappConversationService
         }
 
         $this->flowSessions->startPayout($user, ['payout_id' => $payout->id]);
-        $label = match (true) {
-            $payout->isCoordinatorFee() => 'ada yako ya Kijumbe',
-            $payout->isMemberAdjustment() => 'marekebisho ya malipo yako',
-            default => 'marejesho yako',
-        };
+        $label = $payout->isCoordinatorFee() ? 'ada yako ya Kijumbe' : 'marejesho yako';
         $this->whatsapp->sendText($user, 'Tuma namba ya simu utakayotumia kupokea '.$label.' ya TZS '.number_format((int) $payout->amount).'. Mfano 0748281701. Tuma KATISHA ukitaka kuacha.');
     }
 

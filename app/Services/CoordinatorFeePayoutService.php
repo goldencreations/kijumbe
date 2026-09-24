@@ -45,13 +45,20 @@ class CoordinatorFeePayoutService
                 return null;
             }
 
-            $amount = (int) PaymentAllocation::query()
+            $legacyCollectedAmount = (int) PaymentAllocation::query()
                 ->join('payment_attempts', 'payment_attempts.id', '=', 'payment_allocations.payment_attempt_id')
                 ->join('member_payment_obligations', 'member_payment_obligations.id', '=', 'payment_allocations.member_payment_obligation_id')
                 ->where('payment_attempts.status', PaymentAttemptStatus::Successful->value)
                 ->where('member_payment_obligations.group_id', $cycle->group_id)
                 ->whereBetween('member_payment_obligations.round_number', [1, (int) $cycle->member_count])
                 ->sum('payment_allocations.coordinator_fee_amount');
+            $deductedAmount = (int) Payout::query()
+                ->join('rounds', 'rounds.id', '=', 'payouts.round_id')
+                ->where('rounds.cycle_id', $cycle->id)
+                ->where('purpose', Payout::PURPOSE_MEMBER)
+                ->where('payouts.status', PayoutStatus::Paid->value)
+                ->sum('payouts.coordinator_fee_amount');
+            $amount = $legacyCollectedAmount + $deductedAmount;
             if ($amount <= 0) {
                 return null;
             }
