@@ -22,6 +22,28 @@ class WhatsappPaymentMenuTest extends TestCase
 {
     use RefreshDatabase;
 
+    public function test_cancelling_a_flow_returns_the_main_menu_as_a_dropdown_list(): void
+    {
+        $member = User::factory()->create([
+            'phone' => '255700000099',
+            'whatsapp_wa_id' => '255700000099',
+            'whatsapp_opted_in_at' => now(),
+        ]);
+        $whatsapp = Mockery::mock(MetaWhatsAppClient::class);
+        $whatsapp->shouldReceive('sendInteractive')->once()->withArgs(function (User $recipient, string $text, array $interaction) use ($member): bool {
+            return $recipient->is($member)
+                && str_contains($text, 'Mchakato umefutwa')
+                && $interaction['type'] === 'list'
+                && in_array('LIPA', array_column($interaction['options'], 'id'), true);
+        })->andReturn(new WhatsappMessage);
+        $this->app->instance(MetaWhatsAppClient::class, $whatsapp);
+
+        app(WhatsappConversationService::class)->handle($member, [
+            'id' => 'cancel-menu-1',
+            'text' => ['body' => 'KATISHA'],
+        ]);
+    }
+
     public function test_payment_menu_excludes_a_completed_mchezo_with_no_outstanding_contributions(): void
     {
         Carbon::setTestNow('2026-09-20 09:00:00');

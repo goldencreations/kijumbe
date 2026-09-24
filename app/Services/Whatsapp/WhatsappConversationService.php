@@ -68,7 +68,7 @@ class WhatsappConversationService
 
         if (in_array($command, ['KATISHA', 'ACHA'], true)) {
             $this->flowSessions->cancelActive($user);
-            $this->sendTemplateMessage($user, 'flow_cancelled', ['main_menu' => $this->mainMenuMessage()]);
+            $this->sendTemplateMessage($user, 'flow_cancelled', ['main_menu' => $this->mainMenuMessage()], 'main_menu');
 
             return;
         }
@@ -173,7 +173,7 @@ class WhatsappConversationService
 
         if (in_array($command, ['KATISHA', 'ACHA'], true)) {
             $this->flowSessions->cancelActive($user);
-            $this->sendTemplateMessage($user, 'flow_cancelled', ['main_menu' => $this->mainMenuMessage()]);
+            $this->sendTemplateMessage($user, 'flow_cancelled', ['main_menu' => $this->mainMenuMessage()], 'main_menu');
 
             return true;
         }
@@ -797,10 +797,10 @@ class WhatsappConversationService
     }
 
     /** @param array<string, scalar|null> $variables */
-    private function sendTemplateMessage(User $user, string $key, array $variables = []): WhatsappMessage
+    private function sendTemplateMessage(User $user, string $key, array $variables = [], ?string $interactionKey = null): WhatsappMessage
     {
         $body = $this->messages->render($key, $variables);
-        $interaction = $this->messages->interaction($key, $variables);
+        $interaction = $this->messages->interaction($interactionKey ?? $key, $variables);
 
         return $interaction
             ? $this->whatsapp->sendInteractive($user, $body, $interaction)
