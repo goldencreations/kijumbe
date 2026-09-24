@@ -1,7 +1,7 @@
-import { createIcons, Orbit, ChevronsUpDown, LayoutDashboard, Layers, Users, Wallet, ArrowUpRight, CircleAlert, MessageCircle, History, LogOut, PanelLeft, ChevronRight, RefreshCw, Plus, Activity, CalendarDays, ArrowDownLeft, ArrowRight, CalendarRange, ChartPie, ChartNoAxesCombined, CalendarClock, UserPlus, Send, Search, SlidersHorizontal, Settings2, Eye, Inbox, ArrowLeft, Play, FileCheck2, X, ShieldCheck, Trash2, RotateCcw } from 'lucide';
+import { createIcons, Orbit, ChevronsUpDown, LayoutDashboard, Layers, Users, Wallet, ArrowUpRight, CircleAlert, MessageCircle, History, LogOut, PanelLeft, ChevronRight, RefreshCw, Plus, Activity, CalendarDays, ArrowDownLeft, ArrowRight, CalendarRange, ChartPie, ChartNoAxesCombined, CalendarClock, UserPlus, Send, Search, SlidersHorizontal, Settings2, Eye, Inbox, ArrowLeft, Play, FileCheck2, X, ShieldCheck, Trash2, RotateCcw, Bold, Italic, Code2, Quote, List } from 'lucide';
 import Chart from 'chart.js/auto';
 
-createIcons({ icons: { Orbit, ChevronsUpDown, LayoutDashboard, Layers, Users, Wallet, ArrowUpRight, CircleAlert, MessageCircle, History, LogOut, PanelLeft, ChevronRight, RefreshCw, Plus, Activity, CalendarDays, ArrowDownLeft, ArrowRight, CalendarRange, ChartPie, ChartNoAxesCombined, CalendarClock, UserPlus, Send, Search, SlidersHorizontal, Settings2, Eye, Inbox, ArrowLeft, Play, FileCheck2, X, ShieldCheck, Trash2, RotateCcw } });
+createIcons({ icons: { Orbit, ChevronsUpDown, LayoutDashboard, Layers, Users, Wallet, ArrowUpRight, CircleAlert, MessageCircle, History, LogOut, PanelLeft, ChevronRight, RefreshCw, Plus, Activity, CalendarDays, ArrowDownLeft, ArrowRight, CalendarRange, ChartPie, ChartNoAxesCombined, CalendarClock, UserPlus, Send, Search, SlidersHorizontal, Settings2, Eye, Inbox, ArrowLeft, Play, FileCheck2, X, ShieldCheck, Trash2, RotateCcw, Bold, Italic, Code2, Quote, List } });
 const sidebarToggle = document.querySelector('[data-sidebar-toggle]');
 const overlay = document.querySelector('[data-sidebar-close]');
 const sidebar = document.querySelector('#sidebar');
@@ -78,6 +78,39 @@ const renderTemplateEditor = editor => {
     });
     editor.replaceChildren(fragment);
 };
+const templateSelectionInside = (editor, range) => range
+    && editor.contains(range.commonAncestorContainer)
+    && ![...editor.querySelectorAll('[data-template-token]')].some(token => range.intersectsNode(token));
+const templateFormat = (editor, format) => {
+    editor.focus();
+    const selection = window.getSelection();
+    const range = selection?.rangeCount ? selection.getRangeAt(0) : null;
+    if (!templateSelectionInside(editor, range)) return;
+
+    const markers = { bold: ['*', '*'], italic: ['_', '_'], monospace: ['```', '```'] };
+    const selected = range.toString();
+    let replacement;
+    let caretOffset;
+    if (format === 'quote' || format === 'bullet') {
+        const prefix = format === 'quote' ? '> ' : '- ';
+        replacement = (selected || '').split('\n').map(line => line ? `${prefix}${line}` : prefix.trimEnd()).join('\n');
+        if (!selected) replacement = prefix;
+        caretOffset = replacement.length;
+    } else {
+        const [opening, closing] = markers[format];
+        replacement = `${opening}${selected}${closing}`;
+        caretOffset = selected ? replacement.length : opening.length;
+    }
+
+    range.deleteContents();
+    const text = document.createTextNode(replacement);
+    range.insertNode(text);
+    range.setStart(text, caretOffset);
+    range.collapse(true);
+    selection.removeAllRanges();
+    selection.addRange(range);
+    syncTemplateEditor(editor);
+};
 document.querySelectorAll('[data-template-editor]').forEach(editor => {
     renderTemplateEditor(editor);
     editor.addEventListener('input', () => syncTemplateEditor(editor));
@@ -90,6 +123,13 @@ document.querySelectorAll('[data-template-editor]').forEach(editor => {
         }
     });
     syncTemplateEditor(editor);
+});
+document.querySelectorAll('[data-template-toolbar]').forEach(toolbar => {
+    const editor = toolbar.closest('form')?.querySelector('[data-template-editor]');
+    toolbar.querySelectorAll('[data-template-format]').forEach(button => {
+        button.addEventListener('mousedown', event => event.preventDefault());
+        button.addEventListener('click', () => templateFormat(editor, button.dataset.templateFormat));
+    });
 });
 document.querySelectorAll('[data-toggle-password]').forEach(button => button.addEventListener('click', () => {
     const input = document.getElementById(button.dataset.togglePassword);

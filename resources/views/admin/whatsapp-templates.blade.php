@@ -22,6 +22,13 @@
             @method('PUT')
             @php($parts = preg_split('/(\{[a-z0-9_]+\})/i', $template['body'], -1, PREG_SPLIT_DELIM_CAPTURE))
             <label class="field">Message body
+                <div class="template-toolbar" data-template-toolbar role="toolbar" aria-label="WhatsApp formatting">
+                    <button type="button" class="button secondary" data-template-format="bold" title="Bold (*text*)"><i data-lucide="bold"></i><span>Bold</span></button>
+                    <button type="button" class="button secondary" data-template-format="italic" title="Italic (_text_)"><i data-lucide="italic"></i><span>Italic</span></button>
+                    <button type="button" class="button secondary" data-template-format="monospace" title="Monospace (```text```)"><i data-lucide="code-2"></i><span>Mono</span></button>
+                    <button type="button" class="button secondary" data-template-format="quote" title="Quote (> text)"><i data-lucide="quote"></i><span>Quote</span></button>
+                    <button type="button" class="button secondary" data-template-format="bullet" title="Bullet list (- text)"><i data-lucide="list"></i><span>Bullets</span></button>
+                </div>
                 <div class="template-editor" data-template-editor contenteditable="true" role="textbox" aria-multiline="true" aria-label="{{ $template['name'] }} message body">
                     @foreach($parts as $part)
                         @if(preg_match('/^\{[a-z0-9_]+\}$/i', $part))
@@ -33,7 +40,7 @@
                 </div>
                 <textarea name="body" data-template-input hidden maxlength="4000" required>{{ $template['body'] }}</textarea>
             </label>
-            <p class="field-hint">Values in code blocks are filled automatically when the message is sent.</p>
+            <p class="field-hint">WhatsApp formatting uses <code>*bold*</code>, <code>_italic_</code>, <code>```monospace```</code>, <code>&gt; quotes</code>, and <code>- bullets</code>. Values in code blocks are filled automatically when the message is sent.</p>
         </x-dialog>
         @if($template['is_custom'])
         <x-dialog :id="'reset-template-'.$template['key']" :title="'Restore '.$template['name']" :action="url('/admin/actions/whatsapp/message-templates/'.$template['key'])" submit="Restore default">
