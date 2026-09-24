@@ -44,7 +44,7 @@ class WhatsappMessageTemplateService
         })->values();
     }
 
-    /** @param array<string, scalar|null> $variables */
+    /** @param array<string, mixed> $variables */
     public function interaction(string $key, array $variables = []): ?array
     {
         $definition = $this->definition($key);
@@ -60,10 +60,15 @@ class WhatsappMessageTemplateService
             return null;
         }
 
+        $interaction['options'] = $this->expandDynamicOptions($interaction['options'] ?? [], $variables);
+        if (($interaction['type'] ?? null) === 'list' && count($interaction['options']) > 10) {
+            return null;
+        }
+
         return $this->replaceVariables($interaction, $variables);
     }
 
-    /** @param array<string, scalar|null> $variables */
+    /** @param array<string, mixed> $variables */
     public function render(string $key, array $variables): string
     {
         $definition = $this->definition($key);
@@ -71,7 +76,10 @@ class WhatsappMessageTemplateService
         $replacements = [];
 
         foreach ($definition['variables'] as $variable) {
-            $replacements['{'.$variable.'}'] = (string) ($variables[$variable] ?? '');
+            $value = $variables[$variable] ?? '';
+            $replacements['{'.$variable.'}'] = is_array($value)
+                ? $this->renderOptions($value)
+                : (string) $value;
         }
 
         $rendered = strtr($body, $replacements);
@@ -108,12 +116,46 @@ class WhatsappMessageTemplateService
         return array_values(array_diff($this->definition($key)['variables'], $present));
     }
 
-    /** @param array<string, mixed> $value @param array<string, scalar|null> $variables */
+    /** @param array<int, array<string, mixed>> $options @param array<string, mixed> $variables @return array<int, array<string, mixed>> */
+    private function expandDynamicOptions(array $options, array $variables): array
+    {
+        $expanded = [];
+        foreach ($options as $option) {
+            $marker = ($option['id'] ?? null) === '{groups}' || ($option['title'] ?? null) === '{groups}';
+            if ($marker && isset($variables['groups']) && is_array($variables['groups'])) {
+                foreach ($variables['groups'] as $group) {
+                    if (is_array($group) && isset($group['id'], $group['title'])) {
+                        $expanded[] = $group;
+                    }
+                }
+
+                continue;
+            }
+            $expanded[] = $option;
+        }
+
+        return $expanded;
+    }
+
+    /** @param array<int, mixed> $options */
+    private function renderOptions(array $options): string
+    {
+        return collect($options)->values()->map(function (mixed $option, int $index): string {
+            if (! is_array($option)) {
+                return (string) $option;
+            }
+
+            return ($index + 1).'. '.(string) ($option['label'] ?? $option['title'] ?? $option['name'] ?? '');
+        })->implode("\n");
+    }
+
+    /** @param array<string, mixed> $value @param array<string, mixed> $variables */
     private function replaceVariables(array $value, array $variables): array
     {
-        $replacements = collect($variables)->mapWithKeys(
-            fn ($replacement, string $name): array => ['{'.$name.'}' => (string) ($replacement ?? '')],
-        )->all();
+        $replacements = collect($variables)
+            ->reject(fn (mixed $replacement): bool => is_array($replacement))
+            ->mapWithKeys(fn ($replacement, string $name): array => ['{'.$name.'}' => (string) ($replacement ?? '')])
+            ->all();
 
         array_walk_recursive($value, function (&$item) use ($replacements): void {
             if (is_string($item)) {

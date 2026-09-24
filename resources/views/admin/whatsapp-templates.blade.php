@@ -58,7 +58,7 @@
                     <label class="field" data-list-button-field>List button label
                         <input name="interaction_button_text" value="{{ $template['interaction']['button_text'] ?? 'Chagua' }}" maxlength="20" placeholder="Chagua">
                     </label>
-                    <div class="interaction-options-heading"><span>Choices</span><button type="button" class="button secondary" data-add-interaction-option><i data-lucide="plus"></i>Add choice</button></div>
+                    <div class="interaction-options-heading"><span>Choices</span><div class="heading-actions">@if(in_array('groups', $template['variables'], true))<button type="button" class="button secondary" data-add-dynamic-groups><i data-lucide="layers"></i>Use {groups}</button>@endif<button type="button" class="button secondary" data-add-interaction-option><i data-lucide="plus"></i>Add choice</button></div></div>
                     <div class="interaction-options" data-interaction-options></div>
                     <input type="hidden" name="interaction_options" data-json data-interaction-options-input value="{{ json_encode($template['interaction']['options'] ?? []) }}">
                     <p class="field-hint" data-interaction-limit></p>
