@@ -51,7 +51,7 @@ class AdminWhatsappMessageTemplateController extends Controller
         $before = $template->exists ? $template->attributesToArray() : ['body' => $definition['body']];
         $attributes = ['body' => $data['body'], 'updated_by' => $request->user()->id];
         if (isset($data['interaction_type'])) {
-            $attributes['interaction'] = $this->validatedInteraction($data);
+            $attributes['interaction'] = $this->validatedInteraction($data, $definition);
         }
         $template->fill($attributes)->save();
         $audit->record('whatsapp_template.updated', $template, $request->user(), $before, $template->fresh()->attributesToArray());
@@ -59,12 +59,17 @@ class AdminWhatsappMessageTemplateController extends Controller
         return response()->json(['data' => ['key' => $key]]);
     }
 
-    /** @param array<string, mixed> $data @return array<string, mixed> */
-    private function validatedInteraction(array $data): array
+    /** @param array<string, mixed> $data @param array<string, mixed> $definition @return array<string, mixed> */
+    private function validatedInteraction(array $data, array $definition): array
     {
         $type = $data['interaction_type'];
         if ($type === 'none') {
             return ['type' => 'none', 'options' => []];
+        }
+        if (($definition['category'] ?? null) !== 'Command menu') {
+            throw ValidationException::withMessages([
+                'interaction_type' => 'Buttons and lists can only be used for replies inside an active WhatsApp conversation.',
+            ]);
         }
         if (mb_strlen($data['body']) > 1024) {
             throw ValidationException::withMessages(['body' => 'Interactive WhatsApp messages cannot exceed 1,024 characters.']);

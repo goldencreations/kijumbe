@@ -44,6 +44,7 @@
                 <textarea name="body" data-template-input hidden maxlength="4000" required>{{ $template['body'] }}</textarea>
             </label>
             <p class="field-hint">WhatsApp formatting uses <code>*bold*</code>, <code>_italic_</code>, <code>```monospace```</code>, <code>&gt; quotes</code>, and <code>- bullets</code>. Values in code blocks are filled automatically when the message is sent.</p>
+            @if($template['category'] === 'Command menu')
             <div class="interaction-editor" data-interaction-editor>
                 <div class="interaction-heading"><div><strong>Member choices</strong><span>Add native WhatsApp buttons or a dropdown list below this message.</span></div></div>
                 <label class="field">Interaction type
@@ -63,6 +64,9 @@
                     <p class="field-hint" data-interaction-limit></p>
                 </div>
             </div>
+            @else
+            <p class="interaction-policy-note"><i data-lucide="circle-alert"></i>Scheduled financial messages stay as plain text because WhatsApp only permits free-form buttons and lists inside the 24-hour reply window.</p>
+            @endif
         </x-dialog>
         @if($template['is_custom'])
         <x-dialog :id="'reset-template-'.$template['key']" :title="'Restore '.$template['name']" :action="url('/admin/actions/whatsapp/message-templates/'.$template['key'])" submit="Restore default">
