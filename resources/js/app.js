@@ -54,13 +54,21 @@ document.querySelectorAll('[data-close-dialog]').forEach(button => button.addEve
 const syncTemplateEditor = editor => {
     const input = editor.closest('form')?.querySelector('[data-template-input]');
     if (!input) return;
-    input.value = [...editor.children].map(child => {
-        if (child.matches('[data-template-token]')) return child.dataset.templateToken;
-        return child.innerText.replace(/\u00a0/g, '');
+    input.value = [...editor.childNodes].map(node => {
+        if (node.nodeType === Node.ELEMENT_NODE && node.matches('[data-template-token]')) return node.dataset.templateToken;
+        return node.textContent.replace(/\u00a0/g, '');
     }).join('').replace(/\r\n/g, '\n');
 };
 document.querySelectorAll('[data-template-editor]').forEach(editor => {
-    editor.querySelectorAll('[data-template-text]').forEach(text => text.addEventListener('input', () => syncTemplateEditor(editor)));
+    editor.addEventListener('input', () => syncTemplateEditor(editor));
+    editor.addEventListener('beforeinput', event => {
+        if (!event.inputType.startsWith('delete')) return;
+        const selection = window.getSelection();
+        const range = selection?.rangeCount ? selection.getRangeAt(0) : null;
+        if (range && [...editor.querySelectorAll('[data-template-token]')].some(token => range.intersectsNode(token))) {
+            event.preventDefault();
+        }
+    });
     syncTemplateEditor(editor);
 });
 document.querySelectorAll('[data-toggle-password]').forEach(button => button.addEventListener('click', () => {

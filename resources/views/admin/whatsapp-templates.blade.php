@@ -22,12 +22,12 @@
             @method('PUT')
             @php($parts = preg_split('/(\{[a-z0-9_]+\})/i', $template['body'], -1, PREG_SPLIT_DELIM_CAPTURE))
             <label class="field">Message body
-                <div class="template-editor" data-template-editor contenteditable="false" role="textbox" aria-multiline="true" aria-label="{{ $template['name'] }} message body">
+                <div class="template-editor" data-template-editor contenteditable="true" role="textbox" aria-multiline="true" aria-label="{{ $template['name'] }} message body">
                     @foreach($parts as $part)
                         @if(preg_match('/^\{[a-z0-9_]+\}$/i', $part))
                             <code class="template-token" data-template-token="{{ $part }}" contenteditable="false">{{ $part }}</code>
                         @else
-                            <span class="template-editor-text" data-template-text contenteditable="true">{{ $part }}</span>
+                            {!! e($part) !!}
                         @endif
                     @endforeach
                 </div>
