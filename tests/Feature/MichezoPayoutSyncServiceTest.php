@@ -622,7 +622,7 @@ class MichezoPayoutSyncServiceTest extends TestCase
         Carbon::setTestNow();
     }
 
-    public function test_end_of_game_mode_releases_every_jina_only_after_the_whole_game_is_funded(): void
+    public function test_end_of_game_mode_releases_each_jinas_confirmed_principal_at_the_final_due_time(): void
     {
         Carbon::setTestNow(Carbon::parse('2026-09-17 16:20:00', 'Africa/Dar_es_Salaam'));
         $users = User::factory()->count(2)->create();
@@ -702,8 +702,8 @@ class MichezoPayoutSyncServiceTest extends TestCase
 
         $rounds = $group->cycles()->firstOrFail()->rounds()->orderBy('number')->get();
         $this->assertCount(2, $rounds);
-        $this->assertTrue($rounds->every(fn ($round) => $round->status !== RoundStatus::ReadyForPayout));
-        $this->assertTrue($rounds->every(fn ($round) => $round->payout_amount === 0));
+        $this->assertTrue($rounds->every(fn ($round) => $round->status === RoundStatus::ReadyForPayout));
+        $this->assertSame([10000, 10000], $rounds->pluck('payout_amount')->all());
         $this->assertSame(
             ['2026-09-17 16:10:00', '2026-09-17 16:10:00'],
             $rounds->map(fn ($round) => $round->due_at->format('Y-m-d H:i:s'))->all(),

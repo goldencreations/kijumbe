@@ -109,12 +109,6 @@ class MichezoPayoutSyncService
             $endOfGameDueAt = $startsAt->copy()->addDays(
                 ($expectedRounds - 1) * max((int) ($group->contribution_interval_days ?: $group->period_days ?: 1), 1),
             );
-            $endOfGameFullyFunded = ! $isEndOfGamePayout || $this->allPrincipalIsFunded(
-                $group,
-                $slots->pluck('id')->all(),
-                $expectedRounds,
-            );
-
             $synced = 0;
             foreach ($roundNumbers as $roundNumber) {
                 $obligations = MemberPaymentObligation::query()
@@ -185,7 +179,26 @@ class MichezoPayoutSyncService
                 }
 
                 $fullyFunded = $required > 0 && $collected >= $required;
-                $eligibleForPayout = $fullyFunded && $endOfGameFullyFunded;
+                if ($isEndOfGamePayout) {
+                    $recipientObligations = MemberPaymentObligation::query()
+                        ->with('allocations.attempt')
+                        ->where('group_id', $group->id)
+                        ->where('group_member_slot_id', $recipientSlot->id)
+                        ->whereBetween('round_number', [1, $expectedRounds])
+                        ->get();
+                    $required = (int) $recipientObligations->sum('principal_amount');
+                    $collected = (int) $recipientObligations->sum(function (MemberPaymentObligation $obligation): int {
+                        return min(
+                            (int) $obligation->principal_amount,
+                            (int) $obligation->allocations
+                                ->filter(fn ($allocation): bool => $allocation->attempt?->status === PaymentAttemptStatus::Successful)
+                                ->sum('principal_amount'),
+                        );
+                    });
+                }
+                $eligibleForPayout = $isEndOfGamePayout
+                    ? now()->gte($roundDueAt) && $collected > 0
+                    : $fullyFunded;
                 $configuredFee = max((int) ($group->kijumbe_fee ?? 0), 0) * $slots->count();
                 // End-of-game members receive only their accumulated principal.
                 // Penalties and Kijumbe fees are accounted for separately and are not returned or deducted here.
@@ -194,10 +207,13 @@ class MichezoPayoutSyncService
                     : max($configuredFee - min($legacyFeeCollected, $configuredFee), 0);
                 $platformPercent = (int) ($group->platform_fee_percent ?? config('kijumbe.platform_fee_percent', 30));
                 [$platformFee, $coordinatorFee] = Group::splitKijumbeFee($deductedFee, $platformPercent);
-                $netPayout = max($required - $deductedFee, 0);
+                $netPayout = $isEndOfGamePayout
+                    ? $collected
+                    : max($required - $deductedFee, 0);
                 $status = match (true) {
                     now()->lt($roundDueAt) => RoundStatus::Scheduled,
                     $eligibleForPayout => RoundStatus::ReadyForPayout,
+                    $isEndOfGamePayout && $collected === 0 => RoundStatus::Paid,
                     now()->lte($graceEndsAt) => RoundStatus::InGrace,
                     default => RoundStatus::Blocked,
                 };
@@ -265,28 +281,5 @@ class MichezoPayoutSyncService
 
             return $synced;
         }, 3);
-    }
-
-    /** @param array<int, string> $slotIds */
-    private function allPrincipalIsFunded(Group $group, array $slotIds, int $expectedRounds): bool
-    {
-        $obligations = MemberPaymentObligation::query()
-            ->with('allocations.attempt')
-            ->where('group_id', $group->id)
-            ->whereIn('group_member_slot_id', $slotIds)
-            ->whereBetween('round_number', [1, $expectedRounds])
-            ->get();
-
-        if ($obligations->count() !== count($slotIds) * $expectedRounds) {
-            return false;
-        }
-
-        return $obligations->every(function (MemberPaymentObligation $obligation): bool {
-            $confirmedPrincipal = $obligation->allocations
-                ->filter(fn ($allocation): bool => $allocation->attempt?->status === PaymentAttemptStatus::Successful)
-                ->sum('principal_amount');
-
-            return (int) $confirmedPrincipal >= (int) $obligation->principal_amount;
-        });
     }
 }
