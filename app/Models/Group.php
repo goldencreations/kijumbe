@@ -151,6 +151,11 @@ class Group extends Model
         return self::normalizeGroupType($this->group_type) === self::TYPE_PRODUCT ? 'Bidhaa' : 'Pesa';
     }
 
+    public function isProductGroup(): bool
+    {
+        return self::normalizeGroupType($this->group_type) === self::TYPE_PRODUCT;
+    }
+
     public function creator(): BelongsTo
     {
         return $this->belongsTo(User::class, 'created_by');

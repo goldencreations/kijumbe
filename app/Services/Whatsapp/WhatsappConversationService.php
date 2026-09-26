@@ -1281,8 +1281,31 @@ class WhatsappConversationService
             return;
         }
 
+        $group = $payout->round?->cycle?->group ?? $payout->cycle?->group;
+        if ($group && $group->isProductGroup() && ! $payout->isGoodsProceeds()) {
+            $this->flowSessions->startPayout($user, ['payout_id' => $payout->id]);
+            $session = $this->flowSessions->resume($user, WhatsappFlowSessionService::PAYOUT);
+            $this->flowSessions->advance($session, 'await_goods_receipt_confirmation', ['payout_id' => $payout->id]);
+            $this->whatsapp->sendInteractive($user,
+                "Siku yako ya kupokea bidhaa katika {$group->name} imefika. Je, umepokea bidhaa zako?",
+                [
+                    'type' => 'buttons',
+                    'options' => [
+                        ['id' => 'NDIO', 'title' => 'Nimepokea'],
+                        ['id' => 'HAPANA', 'title' => 'Sijapokea'],
+                    ],
+                ],
+            );
+
+            return;
+        }
+
         $this->flowSessions->startPayout($user, ['payout_id' => $payout->id]);
-        $label = $payout->isCoordinatorFee() ? 'ada yako ya Kijumbe' : 'marejesho yako';
+        $label = match (true) {
+            $payout->isCoordinatorFee() => 'ada yako ya Kijumbe',
+            $payout->isGoodsProceeds() => 'michango ya bidhaa iliyothibitishwa',
+            default => 'marejesho yako',
+        };
         $this->sendTemplateMessage($user, 'payout_phone_prompt', [
             'payout_label' => $label,
             'amount' => number_format((int) $payout->amount),
@@ -1297,7 +1320,12 @@ class WhatsappConversationService
             return false;
         }
 
-        $text = trim((string) (data_get($message, 'text.body') ?? ''));
+        $text = trim((string) (
+            data_get($message, 'text.body')
+            ?? data_get($message, 'interactive.button_reply.id')
+            ?? data_get($message, 'interactive.list_reply.id')
+            ?? ''
+        ));
         $payload = $session->payload ?? [];
         $payout = Payout::query()->with(['round.cycle.group', 'cycle.group'])->find($payload['payout_id'] ?? null);
         if (! $payout) {
@@ -1308,6 +1336,54 @@ class WhatsappConversationService
         }
 
         try {
+            if ($session->step_key === 'await_goods_receipt_confirmation') {
+                if (! in_array(strtoupper($text), ['NDIO', 'NDIYO', 'YES', '1'], true)) {
+                    if (in_array(strtoupper($text), ['HAPANA', 'NO', '2'], true)) {
+                        $this->flowSessions->complete($session);
+                        $this->whatsapp->sendText($user, 'Uthibitisho umesitishwa. Tuma POKEA baada ya kupokea bidhaa zako.');
+                    } else {
+                        $this->whatsapp->sendText($user, 'Chagua NIMEPOKEA kuthibitisha au SIJAPOKEA kusitisha.');
+                    }
+
+                    return true;
+                }
+
+                $payout = DB::transaction(function () use ($payout, $user): Payout {
+                    $locked = Payout::query()->with('round.cycle.group')->lockForUpdate()->findOrFail($payout->id);
+                    $group = $locked->round?->cycle?->group;
+                    if (! $group || ! $group->isProductGroup()
+                        || (int) $locked->recipient?->groupMember?->user_id !== (int) $user->id) {
+                        throw new \RuntimeException('Uthibitisho wa bidhaa haulingani na mpokeaji wa mzunguko huu.');
+                    }
+
+                    $locked->update([
+                        'purpose' => Payout::PURPOSE_GOODS_PROCEEDS,
+                        'recipient_cycle_member_id' => null,
+                        'recipient_user_id' => $group->created_by,
+                        'amount' => (int) $locked->round->collected_amount,
+                        'gross_amount' => (int) $locked->round->collected_amount,
+                        'kijumbe_fee_amount' => 0,
+                        'platform_fee_amount' => 0,
+                        'coordinator_fee_amount' => 0,
+                        'destination_phone' => null,
+                        'notes' => 'Goods receipt confirmed by member '.$user->id.'. Principal only.',
+                    ]);
+
+                    return $locked->fresh('recipientUser', 'round.cycle.group');
+                });
+
+                $this->flowSessions->complete($session);
+                $this->whatsapp->sendText($user, 'Asante. Tumethibitisha kuwa umepokea bidhaa zako. Kijumbe amearifiwa kupokea michango iliyothibitishwa.');
+                if ($payout->recipientUser) {
+                    $this->whatsapp->sendText(
+                        $payout->recipientUser,
+                        "Mwanachama amethibitisha kupokea bidhaa katika {$payout->round->cycle->group->name}. Principal inayopatikana: TZS ".number_format((int) $payout->amount).'. Tuma POKEA kuanza uthibitisho wa namba, OTP na namba ya siri.',
+                    );
+                }
+
+                return true;
+            }
+
             if ($session->step_key === 'await_payment_phone') {
                 $this->payoutSecurity->start($payout, $user, $text);
                 $this->flowSessions->advance($session, 'await_payout_otp', $payload);
