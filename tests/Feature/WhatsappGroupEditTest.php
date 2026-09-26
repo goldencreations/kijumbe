@@ -42,7 +42,7 @@ class WhatsappGroupEditTest extends TestCase
         ]);
 
         $this->assertStringContainsString("Mchezo: {$group->name}", $messages[0]);
-        $this->assertStringContainsString('11. Muda wa kuanza faini', $messages[0]);
+        $this->assertStringContainsString('12. Muda wa kuanza faini', $messages[0]);
         $this->assertDatabaseHas('whatsapp_flow_sessions', [
             'user_id' => $coordinator->id,
             'flow_key' => 'group_action',
@@ -74,7 +74,7 @@ class WhatsappGroupEditTest extends TestCase
         $service = app(WhatsappConversationService::class);
         $service->handle($coordinator, ['id' => 'edit-1', 'text' => ['body' => 'EDIT01']]);
         $service->handle($coordinator, ['id' => 'edit-2', 'text' => ['body' => '4']]);
-        $service->handle($coordinator, ['id' => 'edit-3', 'text' => ['body' => '11']]);
+        $service->handle($coordinator, ['id' => 'edit-3', 'text' => ['body' => '12']]);
         $service->handle($coordinator, ['id' => 'edit-4', 'text' => ['body' => '3']]);
 
         $this->assertSame(3, $group->fresh()->penalty_timing_hours);

@@ -1,6 +1,14 @@
 # Michezo Business Rules
 
-This document is the source of truth for the rotating contribution groups.
+## Payout timing
+
+- `rotating` is the normal mode: each jina receives its pooled principal on its assigned turn.
+- `end_of_game` preserves the same recipient order and amount per jina, but every payout is due on the final contribution date.
+- In `end_of_game`, no jina can receive early. Every principal obligation for every jina and round must be funded before any payout becomes available.
+- Once the whole mchezo is funded, all majina become eligible to receive their individual payouts.
+- A goods-group creator is the Kijumbe/owner but is not automatically assigned a jina. They may join later with the group code if they want to contribute.
+
+This document is the source of truth for Kijumbe contribution groups.
 
 ## Group rules
 

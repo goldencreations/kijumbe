@@ -1042,6 +1042,10 @@ class WhatsappConversationService
                 throw new \RuntimeException('Ni Kijumbe wa mchezo pekee anayeweza kubadili taarifa za mchezo.');
             }
 
+            if ($field === 'payout_mode' && $locked->cycle_starts_at && now()->gte($locked->cycle_starts_at)) {
+                throw new \RuntimeException('Namna ya marejesho haiwezi kubadilishwa baada ya mchezo kuanza.');
+            }
+
             if (in_array($field, ['member_slots', 'cycle_starts_at'], true) && $this->groupHasFinancialActivity($locked)) {
                 throw new \RuntimeException('Taarifa hii haiwezi kubadilishwa baada ya malipo kuanza. Badili ada, faini au ratiba ya mizunguko ya baadaye badala yake.');
             }

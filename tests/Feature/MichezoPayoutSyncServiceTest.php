@@ -621,4 +621,103 @@ class MichezoPayoutSyncServiceTest extends TestCase
         );
         Carbon::setTestNow();
     }
+
+    public function test_end_of_game_mode_releases_every_jina_only_after_the_whole_game_is_funded(): void
+    {
+        Carbon::setTestNow(Carbon::parse('2026-09-17 16:20:00', 'Africa/Dar_es_Salaam'));
+        $users = User::factory()->count(2)->create();
+        $group = Group::create([
+            'name' => 'End payout mchezo',
+            'status' => GroupStatus::Active,
+            'created_by' => $users[0]->id,
+            'contribution_amount' => 10000,
+            'currency' => 'TZS',
+            'contribution_interval_days' => 1,
+            'payout_interval_days' => 30,
+            'payout_mode' => Group::PAYOUT_MODE_END_OF_GAME,
+            'member_slots' => 2,
+            'cycle_starts_at' => '2026-09-16 16:10:00',
+            'kijumbe_fee' => 0,
+        ]);
+
+        foreach ($users as $index => $user) {
+            $membership = GroupMember::create([
+                'group_id' => $group->id,
+                'user_id' => $user->id,
+                'member_name' => $user->name,
+                'majina_count' => 1,
+                'role' => $index === 0 ? GroupRole::Coordinator : GroupRole::Member,
+                'is_active' => true,
+                'joined_at' => now(),
+            ]);
+            GroupMemberSlot::create([
+                'group_id' => $group->id,
+                'group_member_id' => $membership->id,
+                'slot_number' => 1,
+                'payout_position' => $index + 1,
+                'status' => 'active',
+            ]);
+        }
+
+        app(MemberPaymentLedgerService::class)->materialize($group->fresh());
+        $obligations = MemberPaymentObligation::query()
+            ->where('group_id', $group->id)
+            ->orderBy('round_number')
+            ->orderBy('group_member_slot_id')
+            ->get();
+        $this->assertCount(4, $obligations);
+
+        $recordPayment = function (MemberPaymentObligation $obligation, int $index) use ($users, $group): void {
+            $attempt = PaymentAttempt::create([
+                'initiated_by' => $users[$index % 2]->id,
+                'provider' => 'ecofy',
+                'method' => 'mobile_money',
+                'order_reference' => 'END-'.$index,
+                'idempotency_key' => 'end-game-payment-'.$index,
+                'phone_e164' => $users[$index % 2]->phone,
+                'amount' => 10000,
+                'currency' => 'TZS',
+                'status' => PaymentAttemptStatus::Successful,
+                'payment_scope' => 'member_ledger',
+                'completed_at' => now(),
+                'metadata' => ['group_id' => $group->id],
+            ]);
+            PaymentAllocation::create([
+                'payment_attempt_id' => $attempt->id,
+                'member_payment_obligation_id' => $obligation->id,
+                'amount' => 10000,
+                'principal_amount' => 10000,
+                'kijumbe_fee_amount' => 0,
+                'platform_fee_amount' => 0,
+                'coordinator_fee_amount' => 0,
+                'penalty_amount' => 0,
+            ]);
+            $obligation->update(['paid_amount' => 10000, 'status' => 'paid', 'paid_at' => now()]);
+        };
+
+        foreach ($obligations->where('round_number', 1)->values() as $index => $obligation) {
+            $recordPayment($obligation, $index);
+        }
+        app(MichezoPayoutSyncService::class)->sync($group->fresh());
+
+        $rounds = $group->cycles()->firstOrFail()->rounds()->orderBy('number')->get();
+        $this->assertCount(2, $rounds);
+        $this->assertTrue($rounds->every(fn ($round) => $round->status !== RoundStatus::ReadyForPayout));
+        $this->assertTrue($rounds->every(fn ($round) => $round->payout_amount === 0));
+        $this->assertSame(
+            ['2026-09-17 16:10:00', '2026-09-17 16:10:00'],
+            $rounds->map(fn ($round) => $round->due_at->format('Y-m-d H:i:s'))->all(),
+        );
+
+        foreach ($obligations->where('round_number', 2)->values() as $index => $obligation) {
+            $recordPayment($obligation, $index + 2);
+        }
+        app(MichezoPayoutSyncService::class)->sync($group->fresh());
+
+        $rounds = $group->cycles()->firstOrFail()->rounds()->with('recipient.groupMember')->orderBy('number')->get();
+        $this->assertTrue($rounds->every(fn ($round) => $round->status === RoundStatus::ReadyForPayout));
+        $this->assertSame([20000, 20000], $rounds->pluck('payout_amount')->all());
+        $this->assertSame($users->pluck('id')->all(), $rounds->map(fn ($round) => $round->recipient->groupMember->user_id)->all());
+        Carbon::setTestNow();
+    }
 }
