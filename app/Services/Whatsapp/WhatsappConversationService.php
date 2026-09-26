@@ -1261,9 +1261,47 @@ class WhatsappConversationService
 
     private function startPayoutFlow(User $user): void
     {
-        $payout = Payout::query()
+        $payouts = $this->availablePayouts($user)->take(10);
+
+        if ($payouts->isEmpty()) {
+            $this->sendTemplateMessage($user, 'payout_unavailable');
+
+            return;
+        }
+
+        if ($payouts->count() > 1) {
+            $session = $this->flowSessions->startPayout($user, ['payout_ids' => $payouts->pluck('id')->all()]);
+            $this->flowSessions->advance($session, 'choose_payout', ['payout_ids' => $payouts->pluck('id')->all()]);
+            $this->whatsapp->sendInteractive($user, 'Chagua mchezo au malipo unayotaka kupokea:', [
+                'type' => 'list',
+                'button_text' => 'Chagua mchezo',
+                'options' => $payouts->map(function (Payout $payout): array {
+                    $group = $payout->round?->cycle?->group ?? $payout->cycle?->group;
+
+                    return [
+                        'id' => (string) $payout->id,
+                        'title' => Str::limit($group?->name ?: 'Malipo', 24, ''),
+                        'description' => 'TZS '.number_format((int) $payout->amount).' - '.($payout->isGoodsProceeds() ? 'Bidhaa' : 'Pesa'),
+                    ];
+                })->all(),
+            ]);
+
+            return;
+        }
+
+        $this->beginPayout($user, $payouts->first());
+    }
+
+    private function availablePayouts(User $user): Collection
+    {
+        return Payout::query()
             ->with(['round.cycle.group', 'cycle.group'])
-            ->whereIn('status', ['pending', 'approved'])
+            ->where(function ($query): void {
+                $query->whereIn('status', ['pending', 'approved'])
+                    ->orWhere(fn ($query) => $query
+                        ->where('purpose', Payout::PURPOSE_GOODS_PROCEEDS)
+                        ->where('status', 'failed'));
+            })
             ->where(function ($query): void {
                 $query->where('purpose', Payout::PURPOSE_COORDINATOR_FEE)
                     ->orWhereHas('round', fn ($query) => $query->where('status', 'ready_for_payout'));
@@ -1273,12 +1311,14 @@ class WhatsappConversationService
                     ->orWhereHas('recipient.groupMember', fn ($query) => $query->where('user_id', $user->id));
             })
             ->oldest('created_at')
-            ->first();
+            ->get();
+    }
 
-        if (! $payout) {
-            $this->sendTemplateMessage($user, 'payout_unavailable');
-
-            return;
+    private function beginPayout(User $user, Payout $payout): void
+    {
+        if ($payout->isGoodsProceeds() && (string) $payout->status->value === 'failed') {
+            $payout->update(['status' => 'pending', 'failure_reason' => null]);
+            $payout->verification()->delete();
         }
 
         $group = $payout->round?->cycle?->group ?? $payout->cycle?->group;
@@ -1327,6 +1367,24 @@ class WhatsappConversationService
             ?? ''
         ));
         $payload = $session->payload ?? [];
+        if ($session->step_key === 'choose_payout') {
+            if (! in_array((int) $text, array_map('intval', $payload['payout_ids'] ?? []), true)) {
+                $this->whatsapp->sendText($user, 'Chaguo hilo halipatikani. Tuma POKEA uanze tena.');
+
+                return true;
+            }
+            $payout = $this->availablePayouts($user)->firstWhere('id', (int) $text);
+            if (! $payout) {
+                $this->flowSessions->complete($session);
+                $this->whatsapp->sendText($user, 'Malipo hayo hayapatikani tena. Tuma POKEA kuangalia mengine.');
+
+                return true;
+            }
+            $this->flowSessions->complete($session);
+            $this->beginPayout($user, $payout);
+
+            return true;
+        }
         $payout = Payout::query()->with(['round.cycle.group', 'cycle.group'])->find($payload['payout_id'] ?? null);
         if (! $payout) {
             $this->flowSessions->complete($session);
