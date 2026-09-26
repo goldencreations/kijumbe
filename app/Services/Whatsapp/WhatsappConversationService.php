@@ -199,7 +199,12 @@ class WhatsappConversationService
             return false;
         }
 
-        $text = trim((string) (data_get($message, 'text.body') ?? ''));
+        $text = trim((string) (
+            data_get($message, 'text.body')
+            ?? data_get($message, 'interactive.button_reply.id')
+            ?? data_get($message, 'interactive.list_reply.id')
+            ?? ''
+        ));
         if ($text === '' && ! $this->isInteractiveFlowReply($message)) {
             return false;
         }
@@ -310,6 +315,30 @@ class WhatsappConversationService
         };
 
         if ($question !== null) {
+            $interaction = match ($step) {
+                'group_type' => [
+                    'type' => 'buttons',
+                    'options' => [
+                        ['id' => '1', 'title' => 'Bidhaa'],
+                        ['id' => '2', 'title' => 'Pesa'],
+                    ],
+                ],
+                'payout_mode' => [
+                    'type' => 'buttons',
+                    'options' => [
+                        ['id' => '1', 'title' => 'Kawaida kwa zamu'],
+                        ['id' => '2', 'title' => 'Mwisho wa mchezo'],
+                    ],
+                ],
+                default => null,
+            };
+
+            if ($interaction !== null) {
+                $this->whatsapp->sendInteractive($user, $question, $interaction);
+
+                return;
+            }
+
             $this->whatsapp->sendText($user, $question);
         }
     }
@@ -333,7 +362,13 @@ class WhatsappConversationService
         $summary .= '13. Muda wa faini: '.((int) ($payload['penalty_timing_hours'] ?? 0))." saa\n";
         $summary .= "14. Namba ya kikundi: itatengenezwa baada ya kuthibitisha\n\n";
         $summary .= 'Jibu NDIO kuthibitisha, au tuma namba ya taarifa unayotaka kubadili.';
-        $this->whatsapp->sendText($user, $summary);
+        $this->whatsapp->sendInteractive($user, $summary, [
+            'type' => 'buttons',
+            'options' => [
+                ['id' => 'NDIO', 'title' => 'Thibitisha'],
+                ['id' => 'HAPANA', 'title' => 'Badili taarifa'],
+            ],
+        ]);
     }
 
     private function creationValue(string $step, string $text): mixed

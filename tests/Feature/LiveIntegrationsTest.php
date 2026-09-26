@@ -228,17 +228,28 @@ class LiveIntegrationsTest extends TestCase
             'is_active' => true,
             'whatsapp_opted_in_at' => now(),
         ]);
+        $interactions = [];
         $whatsapp = Mockery::mock(MetaWhatsAppClient::class);
         $whatsapp->shouldReceive('sendText')->atLeast()->once()->andReturnUsing(fn () => new WhatsappMessage);
+        $whatsapp->shouldReceive('sendInteractive')->atLeast()->once()->andReturnUsing(
+            function (User $user, string $text, array $interaction) use (&$interactions): WhatsappMessage {
+                $interactions[] = $interaction;
+
+                return new WhatsappMessage;
+            },
+        );
         $this->app->instance(MetaWhatsAppClient::class, $whatsapp);
 
         $conversation = $this->app->make(WhatsappConversationService::class);
         $conversation->handle($leader, ['id' => 'wamid.chat.create', 'text' => ['body' => 'UNDA KIKUNDI']]);
 
         foreach (['Mshikamano', '10', '2', 'Asha Kijumbe', '2000', '1', '1', '3', '2026-09-15', '500', '100', '2'] as $index => $answer) {
+            $content = in_array($index, [2, 6], true)
+                ? ['interactive' => ['button_reply' => ['id' => $answer]]]
+                : ['text' => ['body' => $answer]];
             $conversation->handle($leader, [
                 'id' => 'wamid.chat.'.($index + 1),
-                'text' => ['body' => $answer],
+                ...$content,
             ]);
         }
 
@@ -248,7 +259,10 @@ class LiveIntegrationsTest extends TestCase
             ->firstOrFail();
         $this->assertSame('confirmation', $session->step_key);
 
-        $conversation->handle($leader, ['id' => 'wamid.chat.confirm', 'text' => ['body' => 'NDIO']]);
+        $conversation->handle($leader, [
+            'id' => 'wamid.chat.confirm',
+            'interactive' => ['button_reply' => ['id' => 'NDIO']],
+        ]);
 
         $group = Group::query()->where('name', 'Mshikamano')->firstOrFail();
         $this->assertSame('money', $group->group_type);
@@ -267,6 +281,11 @@ class LiveIntegrationsTest extends TestCase
         $this->assertSame(2, $group->penalty_timing_hours);
         $this->assertMatchesRegularExpression('/^MSHIKAMANO-\d{4}$/', $group->group_code);
         $this->assertNotNull($session->fresh()->completed_at);
+        $this->assertSame([
+            ['1', '2'],
+            ['1', '2'],
+            ['NDIO', 'HAPANA'],
+        ], array_map(static fn (array $interaction): array => array_column($interaction['options'], 'id'), $interactions));
     }
 
     public function test_goods_group_uses_end_payout_mode_without_enrolling_its_creator(): void
@@ -280,6 +299,7 @@ class LiveIntegrationsTest extends TestCase
         ]);
         $whatsapp = Mockery::mock(MetaWhatsAppClient::class);
         $whatsapp->shouldReceive('sendText')->atLeast()->once()->andReturnUsing(fn () => new WhatsappMessage);
+        $whatsapp->shouldReceive('sendInteractive')->atLeast()->once()->andReturnUsing(fn () => new WhatsappMessage);
         $this->app->instance(MetaWhatsAppClient::class, $whatsapp);
 
         $conversation = $this->app->make(WhatsappConversationService::class);
