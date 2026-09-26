@@ -637,7 +637,7 @@ class MichezoPayoutSyncServiceTest extends TestCase
             'payout_mode' => Group::PAYOUT_MODE_END_OF_GAME,
             'member_slots' => 2,
             'cycle_starts_at' => '2026-09-16 16:10:00',
-            'kijumbe_fee' => 0,
+            'kijumbe_fee' => 1000,
         ]);
 
         foreach ($users as $index => $user) {
@@ -717,6 +717,7 @@ class MichezoPayoutSyncServiceTest extends TestCase
         $rounds = $group->cycles()->firstOrFail()->rounds()->with('recipient.groupMember')->orderBy('number')->get();
         $this->assertTrue($rounds->every(fn ($round) => $round->status === RoundStatus::ReadyForPayout));
         $this->assertSame([20000, 20000], $rounds->pluck('payout_amount')->all());
+        $this->assertSame([0, 0], $rounds->pluck('kijumbe_fee_amount')->all());
         $this->assertSame($users->pluck('id')->all(), $rounds->map(fn ($round) => $round->recipient->groupMember->user_id)->all());
         Carbon::setTestNow();
     }

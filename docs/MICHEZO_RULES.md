@@ -3,9 +3,10 @@
 ## Payout timing
 
 - `rotating` is the normal mode: each jina receives its pooled principal on its assigned turn.
-- `end_of_game` preserves the same recipient order and amount per jina, but every payout is due on the final contribution date.
+- `end_of_game` pays every jina its own accumulated principal contributions on the final contribution date.
 - In `end_of_game`, no jina can receive early. Every principal obligation for every jina and round must be funded before any payout becomes available.
 - Once the whole mchezo is funded, all majina become eligible to receive their individual payouts.
+- Fines and Kijumbe fees are accounted for separately and are not included in or deducted from the principal returned to a member at the end.
 - A goods-group creator is the Kijumbe/owner but is not automatically assigned a jina. They may join later with the group code if they want to contribute.
 
 This document is the source of truth for Kijumbe contribution groups.

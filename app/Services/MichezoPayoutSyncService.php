@@ -187,7 +187,11 @@ class MichezoPayoutSyncService
                 $fullyFunded = $required > 0 && $collected >= $required;
                 $eligibleForPayout = $fullyFunded && $endOfGameFullyFunded;
                 $configuredFee = max((int) ($group->kijumbe_fee ?? 0), 0) * $slots->count();
-                $deductedFee = max($configuredFee - min($legacyFeeCollected, $configuredFee), 0);
+                // End-of-game members receive only their accumulated principal.
+                // Penalties and Kijumbe fees are accounted for separately and are not returned or deducted here.
+                $deductedFee = $isEndOfGamePayout
+                    ? 0
+                    : max($configuredFee - min($legacyFeeCollected, $configuredFee), 0);
                 $platformPercent = (int) ($group->platform_fee_percent ?? config('kijumbe.platform_fee_percent', 30));
                 [$platformFee, $coordinatorFee] = Group::splitKijumbeFee($deductedFee, $platformPercent);
                 $netPayout = max($required - $deductedFee, 0);
