@@ -235,7 +235,7 @@ class LiveIntegrationsTest extends TestCase
         $conversation = $this->app->make(WhatsappConversationService::class);
         $conversation->handle($leader, ['id' => 'wamid.chat.create', 'text' => ['body' => 'UNDA KIKUNDI']]);
 
-        foreach (['Mshikamano', '10', '2', 'Asha Kijumbe', '2000', '1', '3', '2026-09-15', '500', '100', '2'] as $index => $answer) {
+        foreach (['Mshikamano', '10', '2', 'Asha Kijumbe', '2000', '1', '1', '3', '2026-09-15', '500', '100', '2'] as $index => $answer) {
             $conversation->handle($leader, [
                 'id' => 'wamid.chat.'.($index + 1),
                 'text' => ['body' => $answer],
@@ -258,6 +258,7 @@ class LiveIntegrationsTest extends TestCase
         $this->assertSame(2000, $group->amount_per_day);
         $this->assertSame(1, $group->contribution_interval_days);
         $this->assertSame(3, $group->payout_interval_days);
+        $this->assertSame(Group::PAYOUT_MODE_ROTATING, $group->payout_mode);
         $this->assertSame('daily', $group->payment_frequency);
         $this->assertSame(500, $group->kijumbe_fee);
         $this->assertSame(150, $group->platform_fee_amount);
@@ -266,6 +267,46 @@ class LiveIntegrationsTest extends TestCase
         $this->assertSame(2, $group->penalty_timing_hours);
         $this->assertMatchesRegularExpression('/^MSHIKAMANO-\d{4}$/', $group->group_code);
         $this->assertNotNull($session->fresh()->completed_at);
+    }
+
+    public function test_goods_group_uses_end_payout_mode_without_enrolling_its_creator(): void
+    {
+        $leader = User::factory()->create([
+            'name' => 'Mmiliki wa Duka',
+            'phone' => '255700000031',
+            'whatsapp_wa_id' => '255700000031',
+            'is_active' => true,
+            'whatsapp_opted_in_at' => now(),
+        ]);
+        $whatsapp = Mockery::mock(MetaWhatsAppClient::class);
+        $whatsapp->shouldReceive('sendText')->atLeast()->once()->andReturnUsing(fn () => new WhatsappMessage);
+        $this->app->instance(MetaWhatsAppClient::class, $whatsapp);
+
+        $conversation = $this->app->make(WhatsappConversationService::class);
+        $conversation->handle($leader, ['id' => 'wamid.goods.create', 'text' => ['body' => 'UNDA KIKUNDI']]);
+
+        // End-of-game payouts skip the rotating payout-interval question.
+        foreach (['Bidhaa Yetu', '4', '1', 'Mmiliki wa Duka', '10000', '5', '2', '2026-10-01', '0', '500', '5'] as $index => $answer) {
+            $conversation->handle($leader, [
+                'id' => 'wamid.goods.'.($index + 1),
+                'text' => ['body' => $answer],
+            ]);
+        }
+
+        $session = WhatsappFlowSession::query()
+            ->where('user_id', $leader->id)
+            ->where('flow_key', WhatsappFlowSessionService::GROUP_CREATION)
+            ->firstOrFail();
+        $this->assertSame('confirmation', $session->step_key);
+
+        $conversation->handle($leader, ['id' => 'wamid.goods.confirm', 'text' => ['body' => 'NDIO']]);
+
+        $group = Group::query()->where('name', 'Bidhaa Yetu')->firstOrFail();
+        $this->assertSame(Group::TYPE_PRODUCT, $group->group_type);
+        $this->assertSame(Group::PAYOUT_MODE_END_OF_GAME, $group->payout_mode);
+        $this->assertFalse($group->memberships()->where('user_id', $leader->id)->exists());
+        $this->assertSame(0, $group->slots()->count());
+        $this->assertSame($leader->id, $group->created_by);
     }
 
     public function test_group_code_flow_allows_join_and_details_with_session_persistence(): void
