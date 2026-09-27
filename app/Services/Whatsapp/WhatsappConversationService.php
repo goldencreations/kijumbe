@@ -13,6 +13,7 @@ use App\Models\User;
 use App\Models\WhatsappFlowSession;
 use App\Models\WhatsappMessage;
 use App\Services\DailyContributionService;
+use App\Services\GoodsPayoutAggregationService;
 use App\Services\GroupFinancialReportService;
 use App\Services\MemberPaymentLedgerService;
 use App\Services\MichezoPayoutSyncService;
@@ -41,6 +42,7 @@ class WhatsappConversationService
         private readonly PhoneNumber $phones,
         private readonly PayoutSecurityService $payoutSecurity,
         private readonly WhatsappMessageTemplateService $messages,
+        private readonly GoodsPayoutAggregationService $goodsPayouts,
     ) {}
 
     /** @param array<string, mixed> $message */
@@ -1261,6 +1263,7 @@ class WhatsappConversationService
 
     private function startPayoutFlow(User $user): void
     {
+        $this->goodsPayouts->aggregateFor($user);
         $payouts = $this->availablePayouts($user)->take(10);
 
         if ($payouts->isEmpty()) {
@@ -1302,8 +1305,12 @@ class WhatsappConversationService
                         ->where('purpose', Payout::PURPOSE_GOODS_PROCEEDS)
                         ->where('status', 'failed'));
             })
+            ->whereNull('goods_aggregate_payout_id')
             ->where(function ($query): void {
                 $query->where('purpose', Payout::PURPOSE_COORDINATOR_FEE)
+                    ->orWhere(fn ($query) => $query
+                        ->where('purpose', Payout::PURPOSE_GOODS_PROCEEDS)
+                        ->whereNull('round_id'))
                     ->orWhereHas('round', fn ($query) => $query->where('status', 'ready_for_payout'));
             })
             ->where(function ($query) use ($user): void {
@@ -1341,6 +1348,20 @@ class WhatsappConversationService
         }
 
         $this->flowSessions->startPayout($user, ['payout_id' => $payout->id]);
+        if ($payout->isGoodsAggregate()) {
+            $items = $this->goodsPayouts->summary($payout);
+            $lines = $items->map(fn (array $item, int $index): string => ($index + 1).'. '.$item['name']
+                .' - mzunguko '.$item['round'].' - TZS '.number_format($item['amount']));
+            $this->whatsapp->sendText(
+                $user,
+                "MUHTASARI WA BIDHAA ZILIZOTHIBITISHWA\n"
+                .'Mchezo: '.($group?->name ?: 'Mchezo wa bidhaa')."\n"
+                ."Wanachama waliothibitisha: {$items->count()}\n\n"
+                .$lines->implode("\n")."\n\n"
+                .'Jumla ya michango halisi utakayopokea: TZS '.number_format((int) $payout->amount)."\n"
+                .'Ada na faini hazijajumuishwa kwenye malipo haya.',
+            );
+        }
         $label = match (true) {
             $payout->isCoordinatorFee() => 'ada yako ya Kijumbe',
             $payout->isGoodsProceeds() => 'michango ya bidhaa iliyothibitishwa',

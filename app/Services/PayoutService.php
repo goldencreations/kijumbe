@@ -104,6 +104,19 @@ class PayoutService
                 'response_payload' => $payload,
                 'processed_at' => now(),
             ]);
+            $goodsSources = $payout->goodsSources()->lockForUpdate()->get();
+            foreach ($goodsSources as $source) {
+                $source->update([
+                    'status' => PayoutStatus::Paid,
+                    'provider_reference' => $providerReference,
+                    'payment_reference' => $providerReference,
+                    'processed_at' => now(),
+                ]);
+                if ($source->round_id) {
+                    $sourceRound = Round::query()->lockForUpdate()->findOrFail($source->round_id);
+                    $this->finalizePaidRound($source, $sourceRound);
+                }
+            }
             $payout->verification()->update(['status' => 'paid']);
             if ($round) {
                 $this->finalizePaidRound($payout, $round);
@@ -146,6 +159,13 @@ class PayoutService
                 'response_payload' => $payload,
                 'failure_reason' => data_get($payload, 'data.message') ?: data_get($payload, 'message'),
             ]);
+
+            if (in_array($status, [PayoutStatus::Refunded, PayoutStatus::Reversed], true)) {
+                $payout->goodsSources()->update([
+                    'status' => $status->value,
+                    'failure_reason' => data_get($payload, 'data.message') ?: data_get($payload, 'message'),
+                ]);
+            }
 
             if (in_array($status, [PayoutStatus::Refunded, PayoutStatus::Reversed], true)) {
                 if ($payout->round_id) {
