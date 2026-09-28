@@ -11,7 +11,6 @@
 <section class="data-section full-table">
     <form method="get" class="filter-bar">
         @if($page === 'payments')
-            @if(request()->boolean('overdue'))<input type="hidden" name="overdue" value="1">@endif
             <label class="search-input"><i data-lucide="search"></i><input type="search" name="q" value="{{ request('q') }}" placeholder="Search member, phone or group..." aria-label="Search member, phone or group"></label>
             <select name="group_id" aria-label="Filter by WhatsApp group"><option value="">All WhatsApp groups</option>@foreach($groups as $group)<option value="{{ $group->id }}" @selected(request('group_id') === $group->id)>{{ $group->name }}</option>@endforeach</select>
             <label class="date-filter">From<input type="date" name="date_from" value="{{ request('date_from') }}" aria-label="Payment date from"></label>
@@ -22,7 +21,7 @@
         @if($page === 'groups')<select name="group_type" aria-label="Filter by group type"><option value="">All types</option>@foreach($groupTypes as $value => $label)<option value="{{ $value }}" @selected(request('group_type') === $value)>{{ $label }}</option>@endforeach</select>@endif
         @if(count($statuses))<select name="status" aria-label="Filter by status"><option value="">All statuses</option>@foreach($statuses as $status)<option value="{{ $status }}" @selected(request('status') === $status)>{{ ucfirst(str_replace('_', ' ', $status)) }}</option>@endforeach</select>@endif
         <button class="button secondary"><i data-lucide="sliders-horizontal"></i>Filter</button>
-        @if(request()->filled('q') || request()->filled('status') || request()->filled('group_type') || request()->filled('group_id') || request()->filled('date_from') || request()->filled('date_to') || request()->boolean('overdue'))<a class="text-link" href="{{ route('admin.list', $page) }}">Clear</a>@endif
+        @if(request()->filled('q') || request()->filled('status') || request()->filled('group_type') || request()->filled('group_id') || request()->filled('date_from') || request()->filled('date_to'))<a class="text-link" href="{{ route('admin.list', $page) }}">Clear</a>@endif
         <span class="record-count">{{ $records->total() }} {{ Str::plural('record', $records->total()) }}</span>
     </form>
     <div class="table-scroll"><table><thead><tr>@foreach($headers[$page] as $header)<th>{{ $header }}</th>@endforeach</tr></thead><tbody>
@@ -37,30 +36,16 @@
             @push('dialogs')<x-dialog :id="'member-'.$record->id" title="WhatsApp access" :action="url('/admin/actions/members/'.$record->id.'/whatsapp')">@method('PUT')<p class="form-context">{{ $record->name }}</p><label class="field">Phone number<input name="phone" value="{{ $record->phone_local }}" placeholder="0748281701" required></label><label class="field">Messaging consent<select name="opted_in"><option value="1" @selected($record->whatsapp_opted_in_at && !$record->whatsapp_opted_out_at)>Opted in</option><option value="0" @selected(!$record->whatsapp_opted_in_at || $record->whatsapp_opted_out_at)>Opted out</option></select></label></x-dialog>@endpush
             @break
         @case('payments')
-            @if($record instanceof \App\Models\Contribution)
-                @php
-                    $membership = $record->cycleMember?->groupMember;
-                    $member = $membership?->user;
-                    $group = $record->round?->cycle?->group;
-                    $memberName = $membership?->member_name ?: $member?->name ?: 'Unknown member';
-                    $memberPhone = $member?->whatsapp_phone_local ?: $member?->phone_local;
-                @endphp
-                <td><div class="person-cell"><span class="avatar">{{ mb_substr($memberName, 0, 1) }}</span><div><strong>{{ $memberName }}</strong><small>{{ $memberPhone ?: 'Phone unavailable' }}</small>@if($group)<a class="table-group-link" href="{{ route('admin.group', $group) }}">{{ $group->name }} &middot; Round {{ $record->round?->number }}</a>@endif</div></div></td>
-                <td class="numeric"><strong>TZS {{ number_format($record->amount) }}</strong><small>Contribution due</small></td>
-                <td>{{ $record->due_at->timezone('Africa/Dar_es_Salaam')->format('d M Y') }}<small>{{ $record->due_at->timezone('Africa/Dar_es_Salaam')->format('H:i') }} EAT</small></td>
-                <td><x-status value="pending"/><small class="error-text">Overdue</small></td>
-                <td><strong>Not paid</strong><small>No successful payment recorded</small></td>
-                <td>@if($record->round)<a class="icon-button" href="{{ route('admin.cycle', $record->round->cycle_id) }}#round-{{ $record->round_id }}" aria-label="Open overdue contribution"><i data-lucide="arrow-up-right"></i></a>@endif</td>
-            @else
             @php
                 $contribution = $record->contribution;
-                $obligation = $record->allocations->first()?->obligation;
+                $allocations = $record->relationLoaded('allocations') ? $record->getRelation('allocations') : collect();
+                $obligation = $allocations->first()?->obligation;
                 $membership = $contribution?->cycleMember?->groupMember ?: $obligation?->slot?->groupMember;
                 $member = $membership?->user;
                 $group = $contribution?->round?->cycle?->group ?: $obligation?->group;
                 $memberName = $membership?->displayName() ?: ($member?->name ?: 'WhatsApp '.($record->phone_e164 ?: 'unknown number'));
                 $memberPhone = $membership?->displayPhone() ?: app(\App\Services\PhoneNumber::class)->forDisplay($member?->whatsapp_wa_id ?: ($member?->phone ?: $record->phone_e164));
-                $roundNumbers = $record->allocations->map(fn ($allocation) => $allocation->obligation?->round_number)->filter()->unique()->sort()->values();
+                $roundNumbers = $allocations->map(fn ($allocation) => $allocation->obligation?->round_number)->filter()->unique()->sort()->values();
                 $roundNumber = $contribution?->round?->number ?: $roundNumbers->first();
                 $roundLabel = $roundNumbers->count() > 1 ? 'Rounds '.implode(', ', $roundNumbers->all()) : ($roundNumber ? 'Round '.$roundNumber : null);
                 $paymentDate = $record->completed_at ?: ($record->failed_at ?: ($record->initiated_at ?: $record->created_at));
@@ -75,7 +60,6 @@
             @push('dialogs')
             <dialog id="payment-{{ $record->id }}"><div class="dialog-heading"><h2>Payment details</h2><button class="icon-button" data-close-dialog aria-label="Close"><i data-lucide="x"></i></button></div><div class="dialog-body"><div class="review-summary"><span>Member<strong>{{ $memberName }}</strong></span><span>Group<strong>{{ $group?->name ?: data_get($record->metadata, 'group_name', 'Unknown group') }}</strong></span><span>Amount<strong>{{ $record->currency ?: 'TZS' }} {{ number_format($record->amount) }}</strong></span><span>Status<strong>{{ ucfirst($record->status->value) }}</strong></span><span>Gateway reference<strong class="mono">{{ $reference }}</strong></span></div>@if($record->failure_reason)<p class="form-error">{{ $record->failure_reason }}</p>@endif<h3>Gateway response</h3><pre>{{ json_encode($record->response_payload ?: $record->request_payload, JSON_PRETTY_PRINT | JSON_UNESCAPED_UNICODE) }}</pre></div></dialog>
             @endpush
-            @endif
             @break
         @case('payouts')
             @php($payoutCycle = $record->cycle ?: $record->round?->cycle)
