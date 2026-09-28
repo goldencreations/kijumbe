@@ -100,6 +100,11 @@ class MichezoPayoutSyncService
             }
 
             $expectedRounds = $slots->count();
+            $contributionInterval = max((int) ($group->contribution_interval_days ?: $group->period_days ?: 1), 1);
+            $payoutInterval = max((int) ($group->payout_interval_days ?: 1), 1);
+            $contributionsPerPayout = $isEndOfGamePayout
+                ? 1
+                : max((int) ceil($payoutInterval / $contributionInterval), 1);
             $roundNumbers = MemberPaymentObligation::query()
                 ->where('group_id', $group->id)
                 ->where('round_number', '<=', $expectedRounds)
@@ -112,15 +117,21 @@ class MichezoPayoutSyncService
             );
             $synced = 0;
             foreach ($roundNumbers as $roundNumber) {
+                $firstContributionRound = $isEndOfGamePayout
+                    ? $roundNumber
+                    : (($roundNumber - 1) * $contributionsPerPayout) + 1;
+                $lastContributionRound = $isEndOfGamePayout
+                    ? $roundNumber
+                    : $roundNumber * $contributionsPerPayout;
                 $obligations = MemberPaymentObligation::query()
                     ->with(['allocations.attempt'])
                     ->where('group_id', $group->id)
-                    ->where('round_number', $roundNumber)
+                    ->whereBetween('round_number', [$firstContributionRound, $lastContributionRound])
                     ->whereIn('group_member_slot_id', $slots->pluck('id'))
                     ->get()
-                    ->keyBy('group_member_slot_id');
+                    ->groupBy('group_member_slot_id');
 
-                if ($obligations->count() !== $slots->count()) {
+                if ($obligations->flatten(1)->count() !== $slots->count() * $contributionsPerPayout) {
                     continue;
                 }
 
@@ -145,37 +156,38 @@ class MichezoPayoutSyncService
                 $contributionState = [];
 
                 foreach ($slots as $slot) {
-                    /** @var MemberPaymentObligation $obligation */
-                    $obligation = $obligations->get($slot->id);
-                    $successfulAllocations = $obligation->allocations->filter(
-                        fn ($allocation): bool => $allocation->attempt?->status === PaymentAttemptStatus::Successful,
+                    $slotObligations = $obligations->get($slot->id, collect());
+                    $successfulAllocations = $slotObligations->flatMap(
+                        fn (MemberPaymentObligation $obligation) => $obligation->allocations->filter(
+                            fn ($allocation): bool => $allocation->attempt?->status === PaymentAttemptStatus::Successful,
+                        ),
                     );
-                    $principalPaid = min(
-                        (int) $obligation->principal_amount,
-                        (int) $successfulAllocations->sum('principal_amount'),
-                    );
+                    $slotRequired = (int) $slotObligations->sum('principal_amount');
+                    $principalPaid = min($slotRequired, (int) $successfulAllocations->sum('principal_amount'));
                     $legacyFeeCollected += (int) $successfulAllocations->sum('kijumbe_fee_amount');
-                    $required += (int) $obligation->principal_amount;
+                    $required += $slotRequired;
                     $collected += $principalPaid;
 
+                    /** @var MemberPaymentObligation $latestObligation */
+                    $latestObligation = $slotObligations->sortByDesc('round_number')->first();
                     $latestAttempt = $successfulAllocations
                         ->sortBy(fn ($allocation) => $allocation->attempt?->completed_at?->getTimestamp() ?? 0)
                         ->last()?->attempt;
-                    $paidAt = $latestAttempt?->completed_at ?? $obligation->paid_at;
-                    $isPaid = $principalPaid >= (int) $obligation->principal_amount;
+                    $paidAt = $latestAttempt?->completed_at ?? $latestObligation->paid_at;
+                    $isPaid = $principalPaid >= $slotRequired;
                     $contributionState[$slot->id] = [
-                        'amount' => (int) $obligation->principal_amount,
+                        'amount' => $slotRequired,
                         'status' => $isPaid
-                            ? ($paidAt?->gt($obligation->due_at->copy()->addHours(max((int) ($group->penalty_timing_hours ?? $group->grace_period_hours ?? 0), 0)))
+                            ? ($paidAt?->gt($latestObligation->due_at->copy()->addHours(max((int) ($group->penalty_timing_hours ?? $group->grace_period_hours ?? 0), 0)))
                                 ? ContributionStatus::PaidLate
                                 : ContributionStatus::Paid)
                             : ContributionStatus::Pending,
-                        'due_at' => $obligation->due_at,
-                        'grace_ends_at' => $obligation->due_at->copy()->addHours(max((int) ($group->penalty_timing_hours ?? $group->grace_period_hours ?? 0), 0)),
+                        'due_at' => $latestObligation->due_at,
+                        'grace_ends_at' => $latestObligation->due_at->copy()->addHours(max((int) ($group->penalty_timing_hours ?? $group->grace_period_hours ?? 0), 0)),
                         'paid_at' => $isPaid ? $paidAt : null,
                         'payment_reference' => $isPaid ? $latestAttempt?->provider_reference : null,
-                        'idempotency_key' => 'ledger-obligation-'.$obligation->id,
-                        'notes' => 'Synchronized from member payment ledger obligation '.$obligation->id.'.',
+                        'idempotency_key' => "ledger-window-{$group->id}-{$roundNumber}-{$slot->id}",
+                        'notes' => "Synchronized from contribution rounds {$firstContributionRound}-{$lastContributionRound}.",
                     ];
                 }
 
@@ -200,7 +212,9 @@ class MichezoPayoutSyncService
                 $eligibleForPayout = $isEndOfGamePayout
                     ? now()->gte($roundDueAt) && $collected > 0
                     : $fullyFunded;
-                $configuredFee = max((int) ($group->kijumbe_fee ?? 0), 0) * $slots->count();
+                $configuredFee = max((int) ($group->kijumbe_fee ?? 0), 0)
+                    * $slots->count()
+                    * $contributionsPerPayout;
                 // End-of-game members receive only their accumulated principal.
                 // Penalties and Kijumbe fees are accounted for separately and are not returned or deducted here.
                 $deductedFee = $isEndOfGamePayout

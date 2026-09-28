@@ -402,7 +402,7 @@ class MichezoPayoutSyncServiceTest extends TestCase
                 'status' => PaymentAttemptStatus::Successful,
                 'provider_reference' => 'PROVIDER-'.$index,
                 'completed_at' => now(),
-                'metadata' => ['group_id' => $group->id, 'member_id' => $users[$index]->id],
+                'metadata' => ['group_id' => $group->id, 'member_id' => $users[$index % 4]->id],
             ]);
             PaymentAllocation::create([
                 'payment_attempt_id' => $attempt->id,
@@ -551,6 +551,7 @@ class MichezoPayoutSyncServiceTest extends TestCase
             'payout_interval_days' => 2,
             'cycle_starts_at' => '2026-09-20 00:00:00',
             'penalty_timing_hours' => 1,
+            'kijumbe_fee' => 50,
         ]);
 
         foreach ($users as $index => $user) {
@@ -575,25 +576,25 @@ class MichezoPayoutSyncServiceTest extends TestCase
         app(MemberPaymentLedgerService::class)->materialize($group);
         $obligations = MemberPaymentObligation::query()
             ->where('group_id', $group->id)
-            ->where('round_number', 4)
+            ->whereBetween('round_number', [3, 4])
             ->get();
 
         foreach ($obligations as $index => $obligation) {
             $attempt = PaymentAttempt::create([
                 'contribution_id' => null,
                 'payment_scope' => 'member_ledger',
-                'initiated_by' => $users[$index]->id,
+                'initiated_by' => $users[$index % 4]->id,
                 'provider' => 'ecofy',
                 'method' => 'mobile_money',
                 'order_reference' => 'FUTURE-'.$index,
                 'idempotency_key' => 'future-round-'.$index,
-                'phone_e164' => '25570000000'.$index,
+                'phone_e164' => '25570000000'.($index % 4),
                 'amount' => 200,
                 'currency' => 'TZS',
                 'status' => PaymentAttemptStatus::Successful,
                 'provider_reference' => 'FUTURE-PROVIDER-'.$index,
                 'completed_at' => now(),
-                'metadata' => ['group_id' => $group->id, 'member_id' => $users[$index]->id],
+                'metadata' => ['group_id' => $group->id, 'member_id' => $users[$index % 4]->id],
             ]);
             PaymentAllocation::create([
                 'payment_attempt_id' => $attempt->id,
@@ -610,11 +611,13 @@ class MichezoPayoutSyncServiceTest extends TestCase
 
         app(MichezoPayoutSyncService::class)->sync($group->fresh());
 
-        $round = $group->cycles()->firstOrFail()->rounds()->where('number', 4)->firstOrFail();
-        $this->assertSame(RoundStatus::Scheduled, $round->status);
-        $this->assertSame('2026-09-26 00:00:00', $round->due_at->format('Y-m-d H:i:s'));
-        $this->assertSame('2026-09-26 01:00:00', $round->grace_ends_at->format('Y-m-d H:i:s'));
-        $this->assertDatabaseCount('contributions', 16);
+        $round = $group->cycles()->firstOrFail()->rounds()->where('number', 2)->firstOrFail();
+        $this->assertSame(RoundStatus::ReadyForPayout, $round->status);
+        $this->assertSame('2026-09-22 00:00:00', $round->due_at->format('Y-m-d H:i:s'));
+        $this->assertSame(1600, $round->gross_payout_amount);
+        $this->assertSame(400, $round->kijumbe_fee_amount);
+        $this->assertSame(1200, $round->payout_amount);
+        $this->assertDatabaseCount('contributions', 8);
         $this->assertSame(
             4,
             $round->contributions()->where('status', 'paid_late')->count(),
