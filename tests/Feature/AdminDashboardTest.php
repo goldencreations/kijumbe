@@ -57,6 +57,8 @@ class AdminDashboardTest extends TestCase
         foreach (['groups', 'members', 'payments', 'payouts', 'whatsapp', 'audit', 'exceptions'] as $page) {
             $this->get('/admin/'.$page)->assertOk();
         }
+
+        $this->get('/admin/dashboard')->assertOk()->assertSee('Message templates');
         $this->get('/admin/login')->assertOk()->assertDontSee('Google')->assertDontSee('GitHub')->assertDontSee('Create an account');
     }
 

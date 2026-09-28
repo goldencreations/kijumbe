@@ -4,10 +4,15 @@ namespace Tests\Feature;
 
 use App\Enums\SystemRole;
 use App\Models\User;
+use App\Models\WhatsappMessage;
 use App\Models\WhatsappMessageTemplate;
+use App\Services\MemberPaymentLedgerService;
 use App\Services\Whatsapp\MetaWhatsAppClient;
+use App\Services\Whatsapp\WhatsappConversationService;
+use App\Services\Whatsapp\WhatsappFlowSessionService;
 use App\Services\Whatsapp\WhatsappMessageTemplateService;
 use Illuminate\Foundation\Testing\RefreshDatabase;
+use Mockery;
 use Tests\TestCase;
 
 class WhatsappMessageTemplateTest extends TestCase
@@ -33,6 +38,7 @@ class WhatsappMessageTemplateTest extends TestCase
             ->assertSee('BADILI TAARIFA - Badili mchezo unaoratibu')
             ->assertSee('data-template-preview', false)
             ->assertSee('data-template-format="bullet"', false)
+            ->assertSee('Use {groups}')
             ->assertSee('{group_name}');
 
         $body = 'Habari, deni la {group_name} ni TZS {contribution_due}{penalty_notice} {deadline_notice}.';
@@ -114,6 +120,61 @@ class WhatsappMessageTemplateTest extends TestCase
         $this->assertSame('list', $interaction['type']);
         $this->assertSame('Chagua huduma', $interaction['button_text']);
         $this->assertContains('LIPA', array_column($interaction['options'], 'id'));
+    }
+
+    public function test_groups_variable_expands_into_dropdown_rows_and_message_text(): void
+    {
+        WhatsappMessageTemplate::query()->create([
+            'key' => 'report_start',
+            'body' => config('whatsapp_messages.report_start.body'),
+            'interaction' => [
+                'type' => 'list',
+                'button_text' => 'Chagua mchezo',
+                'options' => [['id' => '{groups}', 'title' => '{groups}']],
+            ],
+        ]);
+        $groups = [
+            ['id' => '1', 'title' => 'Umoja'],
+            ['id' => '2', 'title' => 'Maendeleo'],
+        ];
+        $templates = app(WhatsappMessageTemplateService::class);
+
+        $this->assertStringContainsString("1. Umoja\n2. Maendeleo", $templates->render('report_start', ['groups' => $groups]));
+        $interaction = $templates->interaction('report_start', ['groups' => $groups]);
+
+        $this->assertSame('list', $interaction['type']);
+        $this->assertSame($groups, $interaction['options']);
+    }
+
+    public function test_interactive_button_reply_continues_payment_flow_like_typed_text(): void
+    {
+        $member = User::factory()->create([
+            'is_active' => true,
+            'whatsapp_wa_id' => '255700000012',
+            'whatsapp_opted_in_at' => now(),
+        ]);
+        $session = app(WhatsappFlowSessionService::class)->startPayment($member);
+
+        $ledger = Mockery::mock(MemberPaymentLedgerService::class);
+        $ledger->shouldReceive('groupsForUser')->once()->with(Mockery::on(fn (User $user): bool => $user->is($member)))->andReturn(collect());
+        $this->app->instance(MemberPaymentLedgerService::class, $ledger);
+
+        $whatsapp = Mockery::mock(MetaWhatsAppClient::class);
+        $whatsapp->shouldReceive('sendText')->once()->with(
+            Mockery::on(fn (User $user): bool => $user->is($member)),
+            'Mwanachama huyo hana mchezo unaoweza kulipia kwa sasa.',
+        )->andReturn(new WhatsappMessage);
+        $this->app->instance(MetaWhatsAppClient::class, $whatsapp);
+
+        app(WhatsappConversationService::class)->handle($member, [
+            'type' => 'interactive',
+            'interactive' => [
+                'type' => 'button_reply',
+                'button_reply' => ['id' => '1', 'title' => 'Mimi'],
+            ],
+        ]);
+
+        $this->assertNotNull($session->fresh()->completed_at);
     }
 
     public function test_required_template_variables_cannot_be_removed(): void

@@ -15,7 +15,7 @@ class AdminWhatsappMessageTemplateController extends Controller
     public function index(WhatsappMessageTemplateService $templates): View
     {
         return view('admin.whatsapp-templates', [
-            'page' => 'whatsapp',
+            'page' => 'whatsapp-templates',
             'title' => 'Message templates',
             'templates' => $templates->all(),
         ]);

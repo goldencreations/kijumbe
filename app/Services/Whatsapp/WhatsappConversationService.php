@@ -201,12 +201,7 @@ class WhatsappConversationService
             return false;
         }
 
-        $text = trim((string) (
-            data_get($message, 'text.body')
-            ?? data_get($message, 'interactive.button_reply.id')
-            ?? data_get($message, 'interactive.list_reply.id')
-            ?? ''
-        ));
+        $text = $this->inboundText($message);
         if ($text === '' && ! $this->isInteractiveFlowReply($message)) {
             return false;
         }
@@ -448,7 +443,7 @@ class WhatsappConversationService
     /** @param array<string, mixed> $message */
     private function startGroupActionJourney(User $user, array $message): bool
     {
-        $text = trim((string) (data_get($message, 'text.body') ?? ''));
+        $text = $this->inboundText($message);
         if ($text === '') {
             return false;
         }
@@ -490,7 +485,7 @@ class WhatsappConversationService
             return false;
         }
 
-        $text = trim((string) (data_get($message, 'text.body') ?? ''));
+        $text = $this->inboundText($message);
         $command = $this->command($message);
         $payload = $session->payload ?? [];
         $groupId = (string) ($payload['group_id'] ?? '');
@@ -844,7 +839,7 @@ class WhatsappConversationService
         return $this->messages->render('main_menu', []);
     }
 
-    /** @param array<string, scalar|null> $variables */
+    /** @param array<string, mixed> $variables */
     private function sendTemplateMessage(User $user, string $key, array $variables = [], ?string $interactionKey = null): WhatsappMessage
     {
         $body = $this->messages->render($key, $variables);
@@ -883,16 +878,20 @@ class WhatsappConversationService
         }
 
         $groupIds = [];
-        $groupLines = [];
+        $groupOptions = [];
         foreach ($groups as $index => $group) {
             $number = $index + 1;
             $groupIds[$number] = $group->id;
-            $groupLines[] = "{$number}. {$group->name}";
+            $groupOptions[] = [
+                'id' => (string) $number,
+                'title' => Str::limit($group->name, 24, ''),
+                'label' => $group->name,
+            ];
         }
         $this->flowSessions->startGroupAction($user, 'choose_edit_group', [
             'edit_group_ids' => $groupIds,
         ]);
-        $this->sendTemplateMessage($user, 'group_edit_select', ['groups' => implode("\n", $groupLines)]);
+        $this->sendTemplateMessage($user, 'group_edit_select', ['groups' => $groupOptions]);
     }
 
     private function startFinancialReportFlow(User $user): void
@@ -907,11 +906,12 @@ class WhatsappConversationService
         $this->flowSessions->startFinancialReport($user, [
             'group_ids' => $groups->pluck('id')->values()->all(),
         ]);
-        $lines = [];
-        foreach ($groups as $index => $group) {
-            $lines[] = ($index + 1).". {$group->name}";
-        }
-        $this->sendTemplateMessage($user, 'report_start', ['groups' => implode("\n", $lines)]);
+        $groupOptions = $groups->values()->map(fn (Group $group, int $index): array => [
+            'id' => (string) ($index + 1),
+            'title' => Str::limit($group->name, 24, ''),
+            'label' => $group->name,
+        ])->all();
+        $this->sendTemplateMessage($user, 'report_start', ['groups' => $groupOptions]);
     }
 
     /** @param array<string, mixed> $message */
@@ -922,7 +922,7 @@ class WhatsappConversationService
             return false;
         }
 
-        $choice = trim((string) (data_get($message, 'text.body') ?? ''));
+        $choice = $this->inboundText($message);
         if (! ctype_digit($choice)) {
             $this->whatsapp->sendText($user, 'Tuma namba ya chaguo lililo kwenye orodha ya taarifa.');
 
@@ -1381,12 +1381,7 @@ class WhatsappConversationService
             return false;
         }
 
-        $text = trim((string) (
-            data_get($message, 'text.body')
-            ?? data_get($message, 'interactive.button_reply.id')
-            ?? data_get($message, 'interactive.list_reply.id')
-            ?? ''
-        ));
+        $text = $this->inboundText($message);
         $payload = $session->payload ?? [];
         if ($session->step_key === 'choose_payout') {
             if (! in_array((int) $text, array_map('intval', $payload['payout_ids'] ?? []), true)) {
@@ -1606,7 +1601,7 @@ class WhatsappConversationService
             return false;
         }
 
-        $text = trim((string) (data_get($message, 'text.body') ?? ''));
+        $text = $this->inboundText($message);
         $payload = $session->payload ?? [];
 
         if ($session->step_key === 'await_old_pin') {
@@ -1690,7 +1685,7 @@ class WhatsappConversationService
             return false;
         }
 
-        $text = trim((string) (data_get($message, 'text.body') ?? ''));
+        $text = $this->inboundText($message);
         $payload = $session->payload ?? [];
         $groupId = (string) ($payload['group_id'] ?? '');
         $group = $groupId !== '' ? Group::query()->find($groupId) : null;
@@ -1883,12 +1878,20 @@ class WhatsappConversationService
     /** @param array<string, mixed> $message */
     private function command(array $message): string
     {
-        $text = data_get($message, 'text.body')
-            ?? data_get($message, 'interactive.button_reply.id')
+        return strtoupper($this->inboundText($message));
+    }
+
+    /** @param array<string, mixed> $message */
+    private function inboundText(array $message): string
+    {
+        $text = data_get($message, 'interactive.button_reply.id')
             ?? data_get($message, 'interactive.list_reply.id')
+            ?? data_get($message, 'button.payload')
+            ?? data_get($message, 'button.text')
+            ?? data_get($message, 'text.body')
             ?? '';
 
-        return strtoupper(trim((string) $text));
+        return trim((string) $text);
     }
 
     private function digitsOnly(string $value): ?int

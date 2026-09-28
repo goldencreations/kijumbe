@@ -209,6 +209,7 @@ document.querySelectorAll('[data-interaction-editor]').forEach(editor => {
     const optionsContainer = editor.querySelector('[data-interaction-options]');
     const optionsInput = editor.querySelector('[data-interaction-options-input]');
     const addButton = editor.querySelector('[data-add-interaction-option]');
+    const dynamicGroupsButton = editor.querySelector('[data-add-dynamic-groups]');
     const limitText = editor.querySelector('[data-interaction-limit]');
     let options = JSON.parse(optionsInput.value || '[]');
 
@@ -264,12 +265,26 @@ document.querySelectorAll('[data-interaction-editor]').forEach(editor => {
         listButtonInput.disabled = type.value !== 'list';
         optionsContainer.querySelectorAll('input').forEach(input => { input.disabled = !enabled; });
         addButton.disabled = !enabled || optionsContainer.children.length >= maximum;
+        if (dynamicGroupsButton) {
+            const hasGroups = [...optionsContainer.querySelectorAll('[data-option-id]')].some(input => input.value === '{groups}');
+            dynamicGroupsButton.hidden = type.value !== 'list';
+            dynamicGroupsButton.disabled = !enabled || hasGroups || optionsContainer.children.length >= maximum;
+        }
         limitText.textContent = type.value === 'buttons'
             ? 'Use 1 to 3 choices. Button titles can contain up to 20 characters.'
             : 'Use 1 to 10 choices. The action ID is the command Kijumbe receives.';
         optionsContainer.querySelectorAll('[data-option-title]').forEach(input => { input.maxLength = type.value === 'buttons' ? 20 : 24; });
     };
     addButton.addEventListener('click', () => { addOption(); sync(); update(); });
+    dynamicGroupsButton?.addEventListener('click', () => {
+        [...optionsContainer.querySelectorAll('[data-interaction-option]')].forEach(row => {
+            const values = [...row.querySelectorAll('input')].map(input => input.value.trim());
+            if (values.every(value => value === '')) row.remove();
+        });
+        addOption({ id: '{groups}', title: '{groups}' });
+        sync();
+        update();
+    });
     type.addEventListener('change', () => {
         if (type.value !== 'none' && optionsContainer.children.length === 0) addOption();
         sync();
