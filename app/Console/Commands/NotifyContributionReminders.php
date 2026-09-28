@@ -5,6 +5,7 @@ namespace App\Console\Commands;
 use App\Models\Group;
 use App\Services\MemberPaymentLedgerService;
 use App\Services\Whatsapp\MetaWhatsAppClient;
+use App\Services\Whatsapp\WhatsappMessageTemplateService;
 use Illuminate\Console\Command;
 use Illuminate\Support\Facades\Cache;
 
@@ -17,6 +18,7 @@ class NotifyContributionReminders extends Command
     public function handle(
         MemberPaymentLedgerService $ledger,
         MetaWhatsAppClient $whatsapp,
+        WhatsappMessageTemplateService $messages,
     ): int {
         $sent = 0;
 
@@ -26,7 +28,7 @@ class NotifyContributionReminders extends Command
             ->where(function ($query): void {
                 $query->whereNull('cycle_starts_at')->orWhere('cycle_starts_at', '<=', now());
             })
-            ->chunkById(50, function ($groups) use ($ledger, $whatsapp, &$sent): void {
+            ->chunkById(50, function ($groups) use ($ledger, $whatsapp, $messages, &$sent): void {
                 foreach ($groups as $group) {
                     foreach ($group->memberships as $membership) {
                         $user = $membership->user;
@@ -43,6 +45,7 @@ class NotifyContributionReminders extends Command
                             continue;
                         }
 
+                        $oldestRound = (int) $obligations->min('round_number');
                         $cacheKey = 'kijumbe:contribution-reminder:'.$user->id.':'.$group->id.':'.now()->toDateString();
                         if (! Cache::add($cacheKey, true, now()->endOfDay())) {
                             continue;
@@ -65,11 +68,13 @@ class NotifyContributionReminders extends Command
                             ->sortBy('due_at')
                             ->first();
                         $deadline = $dueToday?->due_at?->timezone('Africa/Dar_es_Salaam')->format('H:i');
-                        $message = "Ukumbusho wa mchango wa {$groupName}.\n"
-                            .'Unadaiwa TZS '.number_format($contributionDue)
-                            .($penaltyDue > 0 ? ' na '.number_format($penaltyDue).' ya fine ya kuchelewa.' : '.')."\n"
-                            .($deadline ? "Mchango wa leo unatakiwa kabla ya {$deadline} EAT.\n" : '')
-                            .'Tuma LIPA, chagua mchezo huu, thibitisha kiasi, kisha tuma namba ya simu ya kulipia.';
+                        $message = $messages->render('contribution_reminder', [
+                            'group_name' => $groupName,
+                            'oldest_round' => $oldestRound,
+                            'contribution_due' => number_format($contributionDue),
+                            'penalty_notice' => $penaltyDue > 0 ? ' na '.number_format($penaltyDue).' ya fine ya kuchelewa.' : '.',
+                            'deadline_notice' => $deadline ? "Mchango wa leo unatakiwa kabla ya {$deadline} EAT." : '',
+                        ]);
 
                         try {
                             $whatsapp->sendText($user, $message);

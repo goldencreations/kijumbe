@@ -18,6 +18,10 @@ class Group extends Model
 
     public const TYPE_PRODUCT = 'product';
 
+    public const PAYOUT_MODE_ROTATING = 'rotating';
+
+    public const PAYOUT_MODE_END_OF_GAME = 'end_of_game';
+
     public $incrementing = false;
 
     protected $keyType = 'string';
@@ -52,6 +56,7 @@ class Group extends Model
         'period_days',
         'payment_frequency',
         'payout_interval_days',
+        'payout_mode',
         'member_slots',
         'cycle_starts_at',
         'payout_order',
@@ -80,6 +85,7 @@ class Group extends Model
             'period_days' => 'integer',
             'payment_frequency' => 'string',
             'payout_interval_days' => 'integer',
+            'payout_mode' => 'string',
             'grace_period_hours' => 'integer',
             'platform_fee_amount' => 'integer',
             'kijumbe_fee' => 'integer',
@@ -96,6 +102,7 @@ class Group extends Model
     {
         static::saving(function (self $group): void {
             $group->group_type = self::normalizeGroupType($group->group_type);
+            $group->payout_mode = self::normalizePayoutMode($group->payout_mode);
             $fee = max((int) ($group->kijumbe_fee ?? $group->platform_fee_amount ?? 0), 0);
             $percent = max(0, min(100, (int) ($group->platform_fee_percent ?? config('kijumbe.platform_fee_percent', 30))));
             [$platform, $coordinator] = self::splitKijumbeFee($fee, $percent);
@@ -114,6 +121,21 @@ class Group extends Model
         };
     }
 
+    public static function normalizePayoutMode(mixed $value): string
+    {
+        return match (strtolower(trim((string) $value))) {
+            self::PAYOUT_MODE_END_OF_GAME, 'end', 'mwisho', 'mwisho wa mchezo' => self::PAYOUT_MODE_END_OF_GAME,
+            default => self::PAYOUT_MODE_ROTATING,
+        };
+    }
+
+    public function getPayoutModeLabelAttribute(): string
+    {
+        return self::normalizePayoutMode($this->payout_mode) === self::PAYOUT_MODE_END_OF_GAME
+            ? 'Marejesho mwisho wa mchezo'
+            : 'Marejesho ya kawaida kwa zamu';
+    }
+
     /** @return array{0: int, 1: int} */
     public static function splitKijumbeFee(int $fee, int $platformPercent): array
     {
@@ -127,6 +149,11 @@ class Group extends Model
     public function getGroupTypeLabelAttribute(): string
     {
         return self::normalizeGroupType($this->group_type) === self::TYPE_PRODUCT ? 'Bidhaa' : 'Pesa';
+    }
+
+    public function isProductGroup(): bool
+    {
+        return self::normalizeGroupType($this->group_type) === self::TYPE_PRODUCT;
     }
 
     public function creator(): BelongsTo

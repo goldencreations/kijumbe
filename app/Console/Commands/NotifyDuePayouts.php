@@ -84,6 +84,15 @@ class NotifyDuePayouts extends Command
                     }
 
                     $groupName = $round->cycle?->group?->name ?: 'kikundi chako';
+                    if ($round->cycle?->group?->isProductGroup()) {
+                        $whatsapp->sendText(
+                            $user,
+                            "Siku yako ya kupokea bidhaa katika {$groupName} imefika. Baada ya kupokea bidhaa, tuma POKEA na uthibitishe. Kijumbe atalipwa principal iliyokusanywa baada ya uthibitisho wako.",
+                        );
+                        $created++;
+
+                        continue;
+                    }
                     $whatsapp->sendText(
                         $user,
                         "Siku yako ya kupokea fedha katika {$groupName} imefika.\n"

@@ -1,0 +1,82 @@
+@extends('admin.layout')
+@section('content')
+<a class="back-link" href="{{ route('admin.list', 'whatsapp') }}"><i data-lucide="arrow-left"></i>Message history</a>
+<div class="page-heading">
+    <div><span class="eyebrow">WHATSAPP AUTOMATION</span><h1>Message templates</h1><p>Edit automatic financial notifications while keeping their live data placeholders intact.</p></div>
+</div>
+<div class="template-list">
+    @foreach($templates->groupBy('category') as $category => $categoryTemplates)
+        <div class="template-section-heading"><span>{{ $category }}</span><small>{{ $categoryTemplates->count() }} templates</small></div>
+        @foreach($categoryTemplates as $template)
+        <article class="template-item">
+            <div class="template-heading">
+                <div><h2>{{ $template['name'] }}</h2><p>{{ $template['description'] }}</p></div>
+                <div class="heading-actions"><span class="badge {{ $template['is_custom'] ? 'badge-active' : '' }}"><span></span>{{ $template['is_custom'] ? 'Customized' : 'Default' }}</span><button class="button secondary" data-open-dialog="edit-template-{{ $template['key'] }}"><i data-lucide="settings-2"></i>Edit</button>@if($template['is_custom'])<button class="icon-button" data-open-dialog="reset-template-{{ $template['key'] }}" title="Restore default" aria-label="Restore {{ $template['name'] }} default"><i data-lucide="rotate-ccw"></i></button>@endif</div>
+            </div>
+            <div class="template-body" data-template-preview>{{ $template['body'] }}</div>
+            @if(($template['interaction']['type'] ?? 'none') !== 'none')
+            <div class="template-interaction-preview"><span>{{ $template['interaction']['type'] === 'list' ? 'Dropdown list' : 'Reply buttons' }}</span><div>@foreach($template['interaction']['options'] as $option)<span class="interaction-chip">{{ $option['title'] }}</span>@endforeach</div></div>
+            @endif
+            <div class="template-meta"><span>Live variables</span><div>@forelse($template['variables'] as $variable)<code>{<span>{{ $variable }}</span>}</code>@empty<small>None</small>@endforelse</div>@if($template['updated_at'])<small>Last changed {{ $template['updated_at']->timezone('Africa/Dar_es_Salaam')->format('d M Y, H:i') }} EAT{{ $template['updated_by'] ? ' by '.$template['updated_by'] : '' }}</small>@endif</div>
+        </article>
+
+        @push('dialogs')
+        <x-dialog :id="'edit-template-'.$template['key']" :title="'Edit '.$template['name']" :action="url('/admin/actions/whatsapp/message-templates/'.$template['key'])" submit="Save template">
+            @method('PUT')
+            @php($parts = preg_split('/(\{[a-z0-9_]+\})/i', $template['body'], -1, PREG_SPLIT_DELIM_CAPTURE))
+            <label class="field">Message body
+                <div class="template-toolbar" data-template-toolbar role="toolbar" aria-label="WhatsApp formatting">
+                    <button type="button" class="button secondary" data-template-format="bold" title="Bold (*text*)"><i data-lucide="bold"></i><span>Bold</span></button>
+                    <button type="button" class="button secondary" data-template-format="italic" title="Italic (_text_)"><i data-lucide="italic"></i><span>Italic</span></button>
+                    <button type="button" class="button secondary" data-template-format="monospace" title="Monospace (```text```)"><i data-lucide="code-2"></i><span>Mono</span></button>
+                    <button type="button" class="button secondary" data-template-format="quote" title="Quote (> text)"><i data-lucide="quote"></i><span>Quote</span></button>
+                    <button type="button" class="button secondary" data-template-format="bullet" title="Bullet list (- text)"><i data-lucide="list"></i><span>Bullets</span></button>
+                </div>
+                <div class="template-editor" data-template-editor contenteditable="true" role="textbox" aria-multiline="true" aria-label="{{ $template['name'] }} message body">
+                    @foreach($parts as $part)
+                        @if(preg_match('/^\{[a-z0-9_]+\}$/i', $part))
+                            <code class="template-token" data-template-token="{{ $part }}" contenteditable="false">{{ $part }}</code>
+                        @else
+                            {!! e($part) !!}
+                        @endif
+                    @endforeach
+                </div>
+                <textarea name="body" data-template-input hidden maxlength="4000" required>{{ $template['body'] }}</textarea>
+            </label>
+            <p class="field-hint">WhatsApp formatting uses <code>*bold*</code>, <code>_italic_</code>, <code>```monospace```</code>, <code>&gt; quotes</code>, and <code>- bullets</code>. Values in code blocks are filled automatically when the message is sent.</p>
+            @if($template['category'] === 'Command menu')
+            <div class="interaction-editor" data-interaction-editor>
+                <div class="interaction-heading"><div><strong>Member choices</strong><span>Add native WhatsApp buttons or a dropdown list below this message.</span></div></div>
+                <label class="field">Interaction type
+                    <select name="interaction_type" data-interaction-type>
+                        <option value="none" @selected(($template['interaction']['type'] ?? 'none') === 'none')>Plain text</option>
+                        <option value="buttons" @selected(($template['interaction']['type'] ?? 'none') === 'buttons')>Reply buttons</option>
+                        <option value="list" @selected(($template['interaction']['type'] ?? 'none') === 'list')>Dropdown list</option>
+                    </select>
+                </label>
+                <div data-interaction-settings>
+                    <label class="field" data-list-button-field>List button label
+                        <input name="interaction_button_text" value="{{ $template['interaction']['button_text'] ?? 'Chagua' }}" maxlength="20" placeholder="Chagua">
+                    </label>
+                    <div class="interaction-options-heading"><span>Choices</span><div class="heading-actions">@if(in_array('groups', $template['variables'], true))<button type="button" class="button secondary" data-add-dynamic-groups><i data-lucide="layers"></i>Use {groups}</button>@endif<button type="button" class="button secondary" data-add-interaction-option><i data-lucide="plus"></i>Add choice</button></div></div>
+                    <div class="interaction-options" data-interaction-options></div>
+                    <input type="hidden" name="interaction_options" data-json data-interaction-options-input value="{{ json_encode($template['interaction']['options'] ?? []) }}">
+                    <p class="field-hint" data-interaction-limit></p>
+                </div>
+            </div>
+            @else
+            <p class="interaction-policy-note"><i data-lucide="circle-alert"></i>Scheduled financial messages stay as plain text because WhatsApp only permits free-form buttons and lists inside the 24-hour reply window.</p>
+            @endif
+        </x-dialog>
+        @if($template['is_custom'])
+        <x-dialog :id="'reset-template-'.$template['key']" :title="'Restore '.$template['name']" :action="url('/admin/actions/whatsapp/message-templates/'.$template['key'])" submit="Restore default">
+            @method('DELETE')
+            <p class="form-context">This removes the customized text and immediately restores the built-in message.</p>
+        </x-dialog>
+        @endif
+        @endpush
+        @endforeach
+    @endforeach
+</div>
+<section class="template-boundary"><i data-lucide="shield-check"></i><div><h2>Interactive replies stay protected</h2><p>Button and list action IDs are delivered to the same command engine as typed replies. Keep each action ID equal to the reply the member would otherwise type.</p></div></section>
+@endsection

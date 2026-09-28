@@ -45,12 +45,17 @@ class MichezoPayoutSyncService
                 return 0;
             }
 
+            $isEndOfGamePayout = Group::normalizePayoutMode($group->payout_mode) === Group::PAYOUT_MODE_END_OF_GAME;
+            $cyclePeriodDays = $isEndOfGamePayout
+                ? max((int) ($group->contribution_interval_days ?: $group->period_days ?: 1), 1)
+                : max((int) ($group->payout_interval_days ?: 1), 1);
+
             $cycle = Cycle::query()->firstOrCreate(
                 ['group_id' => $group->id, 'name' => 'Michezo ledger'],
                 [
                     'contribution_amount' => (int) ($group->contribution_amount ?? $group->amount_per_day),
                     'currency' => strtoupper((string) ($group->currency ?: 'TZS')),
-                    'period_days' => max((int) ($group->payout_interval_days ?: 1), 1),
+                    'period_days' => $cyclePeriodDays,
                     'grace_period_hours' => max((int) ($group->penalty_timing_hours ?? $group->grace_period_hours ?? 0), 0),
                     'starts_at' => $startsAt,
                     'member_count' => $slots->count(),
@@ -62,7 +67,7 @@ class MichezoPayoutSyncService
             $cycle->update([
                 'contribution_amount' => (int) ($group->contribution_amount ?? $group->amount_per_day),
                 'currency' => strtoupper((string) ($group->currency ?: 'TZS')),
-                'period_days' => max((int) ($group->payout_interval_days ?: 1), 1),
+                'period_days' => $cyclePeriodDays,
                 'grace_period_hours' => max((int) ($group->penalty_timing_hours ?? $group->grace_period_hours ?? 0), 0),
                 'starts_at' => $startsAt,
                 'member_count' => $slots->count(),
@@ -100,6 +105,10 @@ class MichezoPayoutSyncService
                 ->orderBy('round_number')
                 ->pluck('round_number');
 
+            $expectedRounds = $slots->count();
+            $endOfGameDueAt = $startsAt->copy()->addDays(
+                ($expectedRounds - 1) * max((int) ($group->contribution_interval_days ?: $group->period_days ?: 1), 1),
+            );
             $synced = 0;
             foreach ($roundNumbers as $roundNumber) {
                 $obligations = MemberPaymentObligation::query()
@@ -122,9 +131,10 @@ class MichezoPayoutSyncService
                 }
 
                 $payoutInterval = max((int) ($group->payout_interval_days ?: 1), 1);
-                $roundDueAt = $startsAt->copy()->addDays(($roundNumber - 1) * $payoutInterval);
-                $latestContributionDueAt = $obligations->max('due_at') ?? $roundDueAt;
-                $graceEndsAt = $latestContributionDueAt->copy()->addHours(
+                $roundDueAt = $isEndOfGamePayout
+                    ? $endOfGameDueAt->copy()
+                    : $startsAt->copy()->addDays(($roundNumber - 1) * $payoutInterval);
+                $graceEndsAt = $roundDueAt->copy()->addHours(
                     max((int) ($group->penalty_timing_hours ?? $group->grace_period_hours ?? 0), 0),
                 );
 
@@ -169,14 +179,41 @@ class MichezoPayoutSyncService
                 }
 
                 $fullyFunded = $required > 0 && $collected >= $required;
+                if ($isEndOfGamePayout) {
+                    $recipientObligations = MemberPaymentObligation::query()
+                        ->with('allocations.attempt')
+                        ->where('group_id', $group->id)
+                        ->where('group_member_slot_id', $recipientSlot->id)
+                        ->whereBetween('round_number', [1, $expectedRounds])
+                        ->get();
+                    $required = (int) $recipientObligations->sum('principal_amount');
+                    $collected = (int) $recipientObligations->sum(function (MemberPaymentObligation $obligation): int {
+                        return min(
+                            (int) $obligation->principal_amount,
+                            (int) $obligation->allocations
+                                ->filter(fn ($allocation): bool => $allocation->attempt?->status === PaymentAttemptStatus::Successful)
+                                ->sum('principal_amount'),
+                        );
+                    });
+                }
+                $eligibleForPayout = $isEndOfGamePayout
+                    ? now()->gte($roundDueAt) && $collected > 0
+                    : $fullyFunded;
                 $configuredFee = max((int) ($group->kijumbe_fee ?? 0), 0) * $slots->count();
-                $deductedFee = max($configuredFee - min($legacyFeeCollected, $configuredFee), 0);
+                // End-of-game members receive only their accumulated principal.
+                // Penalties and Kijumbe fees are accounted for separately and are not returned or deducted here.
+                $deductedFee = $isEndOfGamePayout
+                    ? 0
+                    : max($configuredFee - min($legacyFeeCollected, $configuredFee), 0);
                 $platformPercent = (int) ($group->platform_fee_percent ?? config('kijumbe.platform_fee_percent', 30));
                 [$platformFee, $coordinatorFee] = Group::splitKijumbeFee($deductedFee, $platformPercent);
-                $netPayout = max($required - $deductedFee, 0);
+                $netPayout = $isEndOfGamePayout
+                    ? $collected
+                    : max($required - $deductedFee, 0);
                 $status = match (true) {
-                    $fullyFunded => RoundStatus::ReadyForPayout,
                     now()->lt($roundDueAt) => RoundStatus::Scheduled,
+                    $eligibleForPayout => RoundStatus::ReadyForPayout,
+                    $isEndOfGamePayout && $collected === 0 => RoundStatus::Paid,
                     now()->lte($graceEndsAt) => RoundStatus::InGrace,
                     default => RoundStatus::Blocked,
                 };
@@ -198,7 +235,7 @@ class MichezoPayoutSyncService
                 ];
                 if (! $roundWasPaid) {
                     $roundData += [
-                        'payout_amount' => $fullyFunded ? $netPayout : 0,
+                        'payout_amount' => $eligibleForPayout ? $netPayout : 0,
                         'gross_payout_amount' => $required,
                         'kijumbe_fee_amount' => $deductedFee,
                         'platform_fee_amount' => $platformFee,
@@ -220,7 +257,6 @@ class MichezoPayoutSyncService
                 $synced++;
             }
 
-            $expectedRounds = $slots->count();
             $rounds = $cycle->rounds()->whereBetween('number', [1, $expectedRounds]);
             $hasEveryRound = (clone $rounds)->count() === $expectedRounds;
             $hasUnpaidRound = (clone $rounds)

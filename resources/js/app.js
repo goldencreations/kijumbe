@@ -1,7 +1,7 @@
-import { createIcons, Orbit, ChevronsUpDown, LayoutDashboard, Layers, Users, Wallet, ArrowUpRight, CircleAlert, MessageCircle, History, LogOut, PanelLeft, ChevronRight, RefreshCw, Plus, Activity, CalendarDays, ArrowDownLeft, ArrowRight, CalendarRange, ChartPie, ChartNoAxesCombined, CalendarClock, UserPlus, Send, Search, SlidersHorizontal, Settings2, Eye, Inbox, ArrowLeft, Play, FileCheck2, X, ShieldCheck, Trash2 } from 'lucide';
+import { createIcons, Orbit, ChevronsUpDown, LayoutDashboard, Layers, Users, Wallet, ArrowUpRight, CircleAlert, MessageCircle, History, LogOut, PanelLeft, ChevronRight, RefreshCw, Plus, Activity, CalendarDays, ArrowDownLeft, ArrowRight, CalendarRange, ChartPie, ChartNoAxesCombined, CalendarClock, UserPlus, Send, Search, SlidersHorizontal, Settings2, Eye, Inbox, ArrowLeft, Play, FileCheck2, X, ShieldCheck, Trash2, RotateCcw, Bold, Italic, Code2, Quote, List } from 'lucide';
 import Chart from 'chart.js/auto';
 
-createIcons({ icons: { Orbit, ChevronsUpDown, LayoutDashboard, Layers, Users, Wallet, ArrowUpRight, CircleAlert, MessageCircle, History, LogOut, PanelLeft, ChevronRight, RefreshCw, Plus, Activity, CalendarDays, ArrowDownLeft, ArrowRight, CalendarRange, ChartPie, ChartNoAxesCombined, CalendarClock, UserPlus, Send, Search, SlidersHorizontal, Settings2, Eye, Inbox, ArrowLeft, Play, FileCheck2, X, ShieldCheck, Trash2 } });
+createIcons({ icons: { Orbit, ChevronsUpDown, LayoutDashboard, Layers, Users, Wallet, ArrowUpRight, CircleAlert, MessageCircle, History, LogOut, PanelLeft, ChevronRight, RefreshCw, Plus, Activity, CalendarDays, ArrowDownLeft, ArrowRight, CalendarRange, ChartPie, ChartNoAxesCombined, CalendarClock, UserPlus, Send, Search, SlidersHorizontal, Settings2, Eye, Inbox, ArrowLeft, Play, FileCheck2, X, ShieldCheck, Trash2, RotateCcw, Bold, Italic, Code2, Quote, List } });
 const sidebarToggle = document.querySelector('[data-sidebar-toggle]');
 const overlay = document.querySelector('[data-sidebar-close]');
 const sidebar = document.querySelector('#sidebar');
@@ -51,6 +51,248 @@ if (document.body.dataset.page === 'payouts' && document.querySelector('.badge-p
 document.querySelectorAll('[data-auto-submit]').forEach(el => el.addEventListener('change', () => el.form.requestSubmit()));
 document.querySelectorAll('[data-open-dialog]').forEach(button => button.addEventListener('click', () => document.getElementById(button.dataset.openDialog)?.showModal()));
 document.querySelectorAll('[data-close-dialog]').forEach(button => button.addEventListener('click', () => button.closest('dialog').close()));
+const templateToken = value => {
+    const token = document.createElement('code');
+    token.className = 'template-token';
+    token.dataset.templateToken = value;
+    token.contentEditable = 'false';
+    token.textContent = value;
+    return token;
+};
+const renderTemplateInline = value => {
+    const fragment = document.createDocumentFragment();
+    const pattern = /(\{[a-z0-9_]+\})|```([^`\n]+)```|\*([^*\n]+)\*|_([^_\n]+)_/gi;
+    let cursor = 0;
+    for (const match of value.matchAll(pattern)) {
+        if (match.index > cursor) fragment.append(document.createTextNode(value.slice(cursor, match.index)));
+        if (match[1]) fragment.append(templateToken(match[1]));
+        else {
+            const formatted = document.createElement(match[2] ? 'code' : match[3] ? 'strong' : 'em');
+            if (match[2]) formatted.className = 'template-format-monospace';
+            formatted.append(renderTemplateInline(match[2] || match[3] || match[4]));
+            fragment.append(formatted);
+        }
+        cursor = match.index + match[0].length;
+    }
+    if (cursor < value.length) fragment.append(document.createTextNode(value.slice(cursor)));
+    return fragment;
+};
+const renderTemplateValue = (container, value) => {
+    const fragment = document.createDocumentFragment();
+    value.split('\n').forEach(line => {
+        const quote = line.startsWith('> ');
+        const bullet = /^[-*] /.test(line);
+        const block = document.createElement(quote ? 'blockquote' : 'div');
+        if (bullet) block.dataset.templateBullet = 'true';
+        block.append(renderTemplateInline(line.replace(quote ? /^> / : bullet ? /^[-*] / : /^/, '')));
+        fragment.append(block);
+    });
+    container.replaceChildren(fragment);
+};
+const renderTemplateEditor = editor => {
+    const input = editor.closest('form')?.querySelector('[data-template-input]');
+    if (!input) return;
+    renderTemplateValue(editor, input.value);
+};
+const serializeTemplateNode = node => {
+    if (node.nodeType === Node.TEXT_NODE) return node.textContent.replace(/\u00a0/g, '');
+    if (node.nodeType !== Node.ELEMENT_NODE) return '';
+    if (node.matches('[data-template-token]')) return node.dataset.templateToken;
+    const content = [...node.childNodes].map(serializeTemplateNode).join('');
+    if (node.matches('strong,b')) return `*${content}*`;
+    if (node.matches('em,i')) return `_${content}_`;
+    if (node.matches('.template-format-monospace,[face="monospace"]')) return `\`\`\`${content}\`\`\``;
+    if (node.matches('blockquote')) return `> ${content}`;
+    if (node.matches('[data-template-bullet]')) return `- ${content}`;
+    if (node.matches('br')) return '\n';
+    return content;
+};
+const syncTemplateEditor = editor => {
+    const input = editor.closest('form')?.querySelector('[data-template-input]');
+    if (!input) return;
+    input.value = [...editor.children].map(serializeTemplateNode).join('\n').replace(/\r\n/g, '\n');
+};
+const toggleTemplateLines = (editor, range, format, button) => {
+    const lines = [...editor.children].filter(line => range.intersectsNode(line));
+    if (lines.length === 0) return false;
+    const removing = format === 'bullet'
+        ? lines.every(line => line.hasAttribute('data-template-bullet'))
+        : lines.every(line => line.matches('blockquote'));
+    lines.forEach(line => {
+        if (format === 'bullet') {
+            line.toggleAttribute('data-template-bullet', !removing);
+            return;
+        }
+        const replacement = document.createElement(removing ? 'div' : 'blockquote');
+        if (line.hasAttribute('data-template-bullet')) replacement.dataset.templateBullet = 'true';
+        replacement.append(...line.childNodes);
+        line.replaceWith(replacement);
+    });
+    syncTemplateEditor(editor);
+    button.classList.toggle('is-active', !removing);
+    button.setAttribute('aria-pressed', String(!removing));
+    return true;
+};
+const templateFormat = (editor, format, button) => {
+    if (!editor) return;
+    editor.focus();
+    const command = format === 'bullet' ? 'insertUnorderedList' : format === 'quote' ? 'formatBlock' : format === 'monospace' ? 'fontName' : format;
+    const selection = window.getSelection();
+    const range = selection?.rangeCount ? selection.getRangeAt(0) : null;
+    if (!range || !editor.contains(range.commonAncestorContainer)) return;
+    if (['bullet', 'quote'].includes(format) && toggleTemplateLines(editor, range, format, button)) return;
+    const tokenSelected = range && [...editor.querySelectorAll('[data-template-token]')].some(token => range.intersectsNode(token));
+    if (tokenSelected && !range.collapsed && ['bold', 'italic', 'monospace'].includes(format)) {
+        const token = [...editor.querySelectorAll('[data-template-token]')].find(candidate => range.intersectsNode(candidate));
+        const existing = token.parentElement?.matches('strong,em,.template-format-monospace');
+        const wrapper = format === 'bold' ? 'strong' : format === 'italic' ? 'em' : 'code';
+        if (existing && ((format === 'bold' && token.parentElement.matches('strong')) || (format === 'italic' && token.parentElement.matches('em')) || (format === 'monospace' && token.parentElement.matches('.template-format-monospace')))) {
+            token.parentElement.replaceWith(token);
+        } else {
+            const formatted = document.createElement(wrapper);
+            if (format === 'monospace') formatted.className = 'template-format-monospace';
+            token.replaceWith(formatted);
+            formatted.append(token);
+        }
+        syncTemplateEditor(editor);
+        button.classList.toggle('is-active', !existing);
+        button.setAttribute('aria-pressed', String(!existing));
+        return;
+    }
+    if (tokenSelected && !range.collapsed) return;
+    if (format === 'quote') {
+        const blockquote = range?.commonAncestorContainer.nodeType === Node.ELEMENT_NODE
+            ? range.commonAncestorContainer.closest?.('blockquote')
+            : range?.commonAncestorContainer.parentElement?.closest('blockquote');
+        document.execCommand(command, false, blockquote ? 'div' : 'blockquote');
+    } else if (format === 'monospace') {
+        document.execCommand(command, false, 'monospace');
+    } else {
+        document.execCommand(command, false, null);
+    }
+    syncTemplateEditor(editor);
+    const active = format === 'quote'
+        ? Boolean(editor.querySelector('blockquote:focus, blockquote')) && Boolean(window.getSelection()?.anchorNode?.parentElement?.closest('blockquote'))
+        : format === 'monospace'
+            ? Boolean(window.getSelection()?.anchorNode?.parentElement?.closest('[face="monospace"],.template-format-monospace'))
+            : document.queryCommandState(command);
+    button.classList.toggle('is-active', active);
+    button.setAttribute('aria-pressed', String(active));
+};
+document.querySelectorAll('[data-template-editor]').forEach(editor => {
+    renderTemplateEditor(editor);
+    editor.addEventListener('input', () => syncTemplateEditor(editor));
+    editor.addEventListener('beforeinput', event => {
+        if (!event.inputType.startsWith('delete')) return;
+        const selection = window.getSelection();
+        const range = selection?.rangeCount ? selection.getRangeAt(0) : null;
+        if (range && [...editor.querySelectorAll('[data-template-token]')].some(token => range.intersectsNode(token))) {
+            event.preventDefault();
+        }
+    });
+    syncTemplateEditor(editor);
+});
+document.querySelectorAll('[data-template-preview]').forEach(preview => renderTemplateValue(preview, preview.textContent));
+document.querySelectorAll('[data-template-toolbar]').forEach(toolbar => {
+    const editor = toolbar.closest('form')?.querySelector('[data-template-editor]');
+    toolbar.querySelectorAll('[data-template-format]').forEach(button => {
+        button.addEventListener('mousedown', event => event.preventDefault());
+        button.setAttribute('aria-pressed', 'false');
+        button.addEventListener('click', () => templateFormat(editor, button.dataset.templateFormat, button));
+    });
+});
+document.querySelectorAll('[data-interaction-editor]').forEach(editor => {
+    const type = editor.querySelector('[data-interaction-type]');
+    const settings = editor.querySelector('[data-interaction-settings]');
+    const listButtonField = editor.querySelector('[data-list-button-field]');
+    const listButtonInput = listButtonField.querySelector('input');
+    const optionsContainer = editor.querySelector('[data-interaction-options]');
+    const optionsInput = editor.querySelector('[data-interaction-options-input]');
+    const addButton = editor.querySelector('[data-add-interaction-option]');
+    const dynamicGroupsButton = editor.querySelector('[data-add-dynamic-groups]');
+    const limitText = editor.querySelector('[data-interaction-limit]');
+    let options = JSON.parse(optionsInput.value || '[]');
+
+    const sync = () => {
+        options = [...optionsContainer.querySelectorAll('[data-interaction-option]')].map(row => ({
+            id: row.querySelector('[data-option-id]').value,
+            title: row.querySelector('[data-option-title]').value,
+            description: row.querySelector('[data-option-description]').value,
+        }));
+        optionsInput.value = JSON.stringify(options);
+    };
+    const addOption = (option = {}) => {
+        const row = document.createElement('div');
+        row.className = 'interaction-option';
+        row.dataset.interactionOption = '';
+        const makeInput = (attribute, placeholder, value, maxLength) => {
+            const input = document.createElement('input');
+            input.dataset[attribute] = '';
+            input.placeholder = placeholder;
+            input.value = value || '';
+            input.maxLength = maxLength;
+            input.required = true;
+            input.addEventListener('input', sync);
+            return input;
+        };
+        row.append(
+            makeInput('optionTitle', 'Button or row title', option.title, type.value === 'buttons' ? 20 : 24),
+            makeInput('optionId', 'Reply / command ID', option.id, 256),
+            makeInput('optionDescription', 'Description (optional)', option.description, 72),
+        );
+        row.lastElementChild.required = false;
+        const remove = document.createElement('button');
+        remove.type = 'button';
+        remove.className = 'icon-button';
+        remove.title = 'Remove choice';
+        remove.setAttribute('aria-label', 'Remove choice');
+        remove.innerHTML = '<i data-lucide="trash-2"></i>';
+        remove.addEventListener('click', () => { row.remove(); sync(); update(); });
+        row.append(remove);
+        optionsContainer.append(row);
+        createIcons({ icons: { Trash2 } });
+    };
+    const render = () => {
+        optionsContainer.replaceChildren();
+        options.forEach(addOption);
+        sync();
+    };
+    const update = () => {
+        const enabled = type.value !== 'none';
+        const maximum = type.value === 'buttons' ? 3 : 10;
+        settings.hidden = !enabled;
+        listButtonField.hidden = type.value !== 'list';
+        listButtonInput.disabled = type.value !== 'list';
+        optionsContainer.querySelectorAll('input').forEach(input => { input.disabled = !enabled; });
+        addButton.disabled = !enabled || optionsContainer.children.length >= maximum;
+        if (dynamicGroupsButton) {
+            const hasGroups = [...optionsContainer.querySelectorAll('[data-option-id]')].some(input => input.value === '{groups}');
+            dynamicGroupsButton.hidden = type.value !== 'list';
+            dynamicGroupsButton.disabled = !enabled || hasGroups || optionsContainer.children.length >= maximum;
+        }
+        limitText.textContent = type.value === 'buttons'
+            ? 'Use 1 to 3 choices. Button titles can contain up to 20 characters.'
+            : 'Use 1 to 10 choices. The action ID is the command Kijumbe receives.';
+        optionsContainer.querySelectorAll('[data-option-title]').forEach(input => { input.maxLength = type.value === 'buttons' ? 20 : 24; });
+    };
+    addButton.addEventListener('click', () => { addOption(); sync(); update(); });
+    dynamicGroupsButton?.addEventListener('click', () => {
+        [...optionsContainer.querySelectorAll('[data-interaction-option]')].forEach(row => {
+            const values = [...row.querySelectorAll('input')].map(input => input.value.trim());
+            if (values.every(value => value === '')) row.remove();
+        });
+        addOption({ id: '{groups}', title: '{groups}' });
+        sync();
+        update();
+    });
+    type.addEventListener('change', () => {
+        if (type.value !== 'none' && optionsContainer.children.length === 0) addOption();
+        sync();
+        update();
+    });
+    render();
+    update();
+});
 document.querySelectorAll('[data-toggle-password]').forEach(button => button.addEventListener('click', () => {
     const input = document.getElementById(button.dataset.togglePassword);
     input.type = input.type === 'password' ? 'text' : 'password';
@@ -104,7 +346,12 @@ document.querySelectorAll('[data-api-form]').forEach(form => form.addEventListen
         }
         sessionStorage.setItem('kijumbe-notice', 'Saved successfully.');
         const redirect = form.dataset.redirect;
-        location.assign(redirect ? redirect.replace('{id}', encodeURIComponent(data.data.id)) : location.href);
+        if (redirect) {
+            location.assign(redirect.replace('{id}', encodeURIComponent(data.data.id)));
+        } else {
+            sessionStorage.setItem('kijumbe-scroll-y', String(window.scrollY));
+            location.reload();
+        }
     } catch (error) {
         errorBox.textContent = error instanceof SyntaxError ? 'Template components must be valid JSON.' : error.message;
         errorBox.hidden = false;
@@ -120,6 +367,12 @@ if (notice && document.querySelector('#toast')) {
     toast.hidden = false;
     sessionStorage.removeItem('kijumbe-notice');
     setTimeout(() => { toast.hidden = true; }, 4000);
+}
+const savedScrollValue = sessionStorage.getItem('kijumbe-scroll-y');
+const savedScrollY = Number(savedScrollValue);
+if (savedScrollValue !== null) {
+    sessionStorage.removeItem('kijumbe-scroll-y');
+    if (Number.isFinite(savedScrollY)) requestAnimationFrame(() => window.scrollTo({ top: savedScrollY, behavior: 'auto' }));
 }
 
 Chart.defaults.font.family = "'Instrument Sans', sans-serif";

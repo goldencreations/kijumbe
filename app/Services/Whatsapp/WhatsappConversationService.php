@@ -11,7 +11,9 @@ use App\Models\MemberPaymentObligation;
 use App\Models\Payout;
 use App\Models\User;
 use App\Models\WhatsappFlowSession;
+use App\Models\WhatsappMessage;
 use App\Services\DailyContributionService;
+use App\Services\GoodsPayoutAggregationService;
 use App\Services\GroupFinancialReportService;
 use App\Services\MemberPaymentLedgerService;
 use App\Services\MichezoPayoutSyncService;
@@ -39,6 +41,8 @@ class WhatsappConversationService
         private readonly GroupFinancialReportService $financialReports,
         private readonly PhoneNumber $phones,
         private readonly PayoutSecurityService $payoutSecurity,
+        private readonly WhatsappMessageTemplateService $messages,
+        private readonly GoodsPayoutAggregationService $goodsPayouts,
     ) {}
 
     /** @param array<string, mixed> $message */
@@ -48,7 +52,7 @@ class WhatsappConversationService
 
         if ($command === 'START') {
             $user->update(['whatsapp_opted_in_at' => now(), 'whatsapp_opted_out_at' => null]);
-            $this->whatsapp->sendText($user, $this->mainMenuMessage());
+            $this->sendTemplateMessage($user, 'main_menu');
 
             return;
         }
@@ -66,7 +70,7 @@ class WhatsappConversationService
 
         if (in_array($command, ['KATISHA', 'ACHA'], true)) {
             $this->flowSessions->cancelActive($user);
-            $this->whatsapp->sendText($user, "Mchakato umefutwa.\n\n".$this->mainMenuMessage());
+            $this->sendTemplateMessage($user, 'flow_cancelled', ['main_menu' => $this->mainMenuMessage()], 'main_menu');
 
             return;
         }
@@ -150,15 +154,18 @@ class WhatsappConversationService
 
         if ($command === 'STATUS') {
             if (! $contribution) {
-                $this->whatsapp->sendText($user, 'Huna mchango unaosubiri kulipiwa.');
+                $this->sendTemplateMessage($user, 'status_clear');
             } else {
-                $this->whatsapp->sendText($user, "Mchango unaosubiri: TZS {$contribution->amount}. Mwisho wa kulipa ni {$contribution->due_at->timezone('Africa/Dar_es_Salaam')->format('d M Y H:i')}.");
+                $this->sendTemplateMessage($user, 'status_due', [
+                    'amount' => number_format((int) $contribution->amount),
+                    'deadline' => $contribution->due_at->timezone('Africa/Dar_es_Salaam')->format('d M Y H:i'),
+                ]);
             }
 
             return;
         }
 
-        $this->whatsapp->sendText($user, $this->mainMenuMessage());
+        $this->sendTemplateMessage($user, 'main_menu');
     }
 
     /** @param array<string, mixed> $message */
@@ -168,7 +175,7 @@ class WhatsappConversationService
 
         if (in_array($command, ['KATISHA', 'ACHA'], true)) {
             $this->flowSessions->cancelActive($user);
-            $this->whatsapp->sendText($user, "Mchakato umefutwa.\n\n".$this->mainMenuMessage());
+            $this->sendTemplateMessage($user, 'flow_cancelled', ['main_menu' => $this->mainMenuMessage()], 'main_menu');
 
             return true;
         }
@@ -194,7 +201,7 @@ class WhatsappConversationService
             return false;
         }
 
-        $text = trim((string) (data_get($message, 'text.body') ?? ''));
+        $text = $this->inboundText($message);
         if ($text === '' && ! $this->isInteractiveFlowReply($message)) {
             return false;
         }
@@ -214,7 +221,7 @@ class WhatsappConversationService
             $session = $this->flowSessions->startGroupCreation($user, [
                 'last_message_id' => $messageId,
             ]);
-            $this->whatsapp->sendText($user, "Karibu Kijumbe. Tutaunda kikundi hatua kwa hatua kwa mazungumzo ya Kiswahili. Jibu kila swali; unaweza kurudi baadaye kuendelea.\n\n");
+            $this->sendTemplateMessage($user, 'group_creation_start');
         } else {
             $this->whatsapp->sendText($user, 'Tunaendelea na uundaji wa kikundi chako.');
         }
@@ -236,7 +243,9 @@ class WhatsappConversationService
         }
 
         $payload[$step] = $value;
-        $next = $this->nextGroupCreationStep($step);
+        $next = $step === 'payout_mode' && $value === Group::PAYOUT_MODE_END_OF_GAME
+            ? 'cycle_starts_at'
+            : $this->nextGroupCreationStep($step);
         $this->flowSessions->advance($session, $next, $payload);
 
         if ($next === 'confirmation') {
@@ -279,7 +288,7 @@ class WhatsappConversationService
             }
         }
 
-        $this->whatsapp->sendText($user, 'Jibu NDIO kuthibitisha, au tuma namba ya taarifa unayotaka kubadili (1 hadi 13; namba 5 na 13 hutengenezwa moja kwa moja).');
+        $this->whatsapp->sendText($user, 'Jibu NDIO kuthibitisha, au tuma namba ya taarifa unayotaka kubadili (1 hadi 14; namba 5 na 14 hutengenezwa moja kwa moja).');
 
         return true;
     }
@@ -287,21 +296,46 @@ class WhatsappConversationService
     private function sendGroupCreationQuestion(User $user, string $step): void
     {
         $question = match ($step) {
-            'group_name' => '1/11. Jina la kikundi litaitwaje?',
-            'member_slots' => '2/11. Kikundi kitakuwa na washiriki wangapi?',
-            'group_type' => '3/11. Chagua aina ya kikundi: 1) Bidhaa  2) Pesa',
-            'leader_name' => '4/11. Jina lako kama Kijumbe wa kikundi ni lipi?',
-            'contribution_amount' => '5/11. Kila jina litachangia kiasi gani kwa kila mzunguko? Tuma namba, mfano 10000. Kiasi hiki hakibadiliki kwa sababu ya siku.',
-            'contribution_interval_days' => '6/11. Mchango wa kiasi hicho ulipwe kila baada ya siku ngapi? Mfano 1 ni kila siku, 5 ni kila baada ya siku 5.',
-            'payout_interval_days' => '7/11. Mwanachama atapokea marejesho kila baada ya siku ngapi? Mfano 3 au 10.',
-            'cycle_starts_at' => '8/11. Kikundi kitaanza tarehe gani? Tuma kama 2026-09-15 au 2026-09-15 08:00.',
-            'kijumbe_fee' => '9/11. Ada ya Kijumbe ni kiasi gani kwa kila jina? Ada hii itakatwa kwenye marejesho, si kuongezwa kwenye mchango. Tuma 0 kama hakuna.',
-            'penalty_amount' => '10/11. Faini ya kuchelewa ni kiasi gani? Tuma 0 kama hakuna.',
-            'penalty_timing_hours' => '11/11. Faini itaanza baada ya saa ngapi tangu muda wa malipo upite? Tuma 0 kama hakuna.',
+            'group_name' => '1/12. Jina la kikundi litaitwaje?',
+            'member_slots' => '2/12. Kikundi kitakuwa na washiriki wangapi?',
+            'group_type' => '3/12. Chagua aina ya kikundi: 1) Bidhaa  2) Pesa',
+            'leader_name' => '4/12. Jina lako kama Kijumbe wa kikundi ni lipi?',
+            'contribution_amount' => '5/12. Kila jina litachangia kiasi gani kwa kila mzunguko? Tuma namba, mfano 10000. Kiasi hiki hakibadiliki kwa sababu ya siku.',
+            'contribution_interval_days' => '6/12. Mchango wa kiasi hicho ulipwe kila baada ya siku ngapi? Mfano 1 ni kila siku, 5 ni kila baada ya siku 5.',
+            'payout_mode' => '7/12. Chagua namna ya marejesho: 1) Kawaida, kila jina linapokea kwa zamu  2) Majina yote yanapokea mwisho wa mchezo',
+            'payout_interval_days' => '8/12. Kwa marejesho ya kawaida, jina litapokea kila baada ya siku ngapi? Mfano 3 au 10.',
+            'cycle_starts_at' => '9/12. Kikundi kitaanza tarehe gani? Tuma kama 2026-09-15 au 2026-09-15 08:00.',
+            'kijumbe_fee' => '10/12. Ada ya Kijumbe ni kiasi gani kwa kila jina? Ada hii itakatwa kwenye marejesho, si kuongezwa kwenye mchango. Tuma 0 kama hakuna.',
+            'penalty_amount' => '11/12. Faini ya kuchelewa ni kiasi gani? Tuma 0 kama hakuna.',
+            'penalty_timing_hours' => '12/12. Faini itaanza baada ya saa ngapi tangu muda wa malipo upite? Tuma 0 kama hakuna.',
             default => null,
         };
 
         if ($question !== null) {
+            $interaction = match ($step) {
+                'group_type' => [
+                    'type' => 'buttons',
+                    'options' => [
+                        ['id' => '1', 'title' => 'Bidhaa'],
+                        ['id' => '2', 'title' => 'Pesa'],
+                    ],
+                ],
+                'payout_mode' => [
+                    'type' => 'buttons',
+                    'options' => [
+                        ['id' => '1', 'title' => 'Kawaida kwa zamu'],
+                        ['id' => '2', 'title' => 'Mwisho wa mchezo'],
+                    ],
+                ],
+                default => null,
+            };
+
+            if ($interaction !== null) {
+                $this->whatsapp->sendInteractive($user, $question, $interaction);
+
+                return;
+            }
+
             $this->whatsapp->sendText($user, $question);
         }
     }
@@ -317,14 +351,21 @@ class WhatsappConversationService
         $summary .= "5. Namba ya Kijumbe: {$phone} (moja kwa moja)\n";
         $summary .= '6. Kiasi kwa kila jina kwa mzunguko: TZS '.number_format((int) ($payload['contribution_amount'] ?? 0))."\n";
         $summary .= '7. Mchango kila baada ya siku: '.($payload['contribution_interval_days'] ?? '-')."\n";
-        $summary .= '8. Marejesho kila baada ya siku: '.($payload['payout_interval_days'] ?? '-')."\n";
-        $summary .= '9. Tarehe ya kuanza: '.($payload['cycle_starts_at'] ?? '-')."\n";
-        $summary .= '10. Ada ya Kijumbe kwa kila jina (itakatwa kwenye marejesho): TZS '.number_format((int) ($payload['kijumbe_fee'] ?? 0))."\n";
-        $summary .= '11. Faini: TZS '.number_format((int) ($payload['penalty_amount'] ?? 0))."\n";
-        $summary .= '12. Muda wa faini: '.((int) ($payload['penalty_timing_hours'] ?? 0))." saa\n";
-        $summary .= "13. Namba ya kikundi: itatengenezwa baada ya kuthibitisha\n\n";
+        $summary .= '8. Namna ya marejesho: '.(Group::normalizePayoutMode($payload['payout_mode'] ?? null) === Group::PAYOUT_MODE_END_OF_GAME ? 'Majina yote mwisho wa mchezo' : 'Kawaida kwa zamu')."\n";
+        $summary .= '9. Muda kati ya marejesho: '.(Group::normalizePayoutMode($payload['payout_mode'] ?? null) === Group::PAYOUT_MODE_END_OF_GAME ? 'Mwisho wa mchezo' : (($payload['payout_interval_days'] ?? '-').' siku'))."\n";
+        $summary .= '10. Tarehe ya kuanza: '.($payload['cycle_starts_at'] ?? '-')."\n";
+        $summary .= '11. Ada ya Kijumbe kwa kila jina (itakatwa kwenye marejesho): TZS '.number_format((int) ($payload['kijumbe_fee'] ?? 0))."\n";
+        $summary .= '12. Faini: TZS '.number_format((int) ($payload['penalty_amount'] ?? 0))."\n";
+        $summary .= '13. Muda wa faini: '.((int) ($payload['penalty_timing_hours'] ?? 0))." saa\n";
+        $summary .= "14. Namba ya kikundi: itatengenezwa baada ya kuthibitisha\n\n";
         $summary .= 'Jibu NDIO kuthibitisha, au tuma namba ya taarifa unayotaka kubadili.';
-        $this->whatsapp->sendText($user, $summary);
+        $this->whatsapp->sendInteractive($user, $summary, [
+            'type' => 'buttons',
+            'options' => [
+                ['id' => 'NDIO', 'title' => 'Thibitisha'],
+                ['id' => 'HAPANA', 'title' => 'Badili taarifa'],
+            ],
+        ]);
     }
 
     private function creationValue(string $step, string $text): mixed
@@ -335,6 +376,11 @@ class WhatsappConversationService
             'group_type' => match (strtolower($text)) {
                 '1', 'bidhaa', 'good', 'goods', 'product' => 'product',
                 '2', 'pesa', 'money' => 'money',
+                default => null,
+            },
+            'payout_mode' => match (strtolower(trim($text))) {
+                '1', 'kawaida', 'zamu', 'rotating' => Group::PAYOUT_MODE_ROTATING,
+                '2', 'mwisho', 'mwisho wa mchezo', 'end', 'end_of_game' => Group::PAYOUT_MODE_END_OF_GAME,
                 default => null,
             },
             'contribution_interval_days', 'payout_interval_days' => $this->positiveDigits($text),
@@ -361,7 +407,8 @@ class WhatsappConversationService
             'group_type' => 'leader_name',
             'leader_name' => 'contribution_amount',
             'contribution_amount' => 'contribution_interval_days',
-            'contribution_interval_days' => 'payout_interval_days',
+            'contribution_interval_days' => 'payout_mode',
+            'payout_mode' => 'payout_interval_days',
             'payout_interval_days' => 'cycle_starts_at',
             'cycle_starts_at' => 'kijumbe_fee',
             'kijumbe_fee' => 'penalty_amount',
@@ -375,8 +422,9 @@ class WhatsappConversationService
     {
         return [
             1 => 'group_name', 2 => 'member_slots', 3 => 'group_type', 4 => 'leader_name',
-            6 => 'contribution_amount', 7 => 'contribution_interval_days', 8 => 'payout_interval_days',
-            9 => 'cycle_starts_at', 10 => 'kijumbe_fee', 11 => 'penalty_amount', 12 => 'penalty_timing_hours',
+            6 => 'contribution_amount', 7 => 'contribution_interval_days', 8 => 'payout_mode',
+            9 => 'payout_interval_days', 10 => 'cycle_starts_at', 11 => 'kijumbe_fee',
+            12 => 'penalty_amount', 13 => 'penalty_timing_hours',
         ][$number] ?? null;
     }
 
@@ -395,7 +443,7 @@ class WhatsappConversationService
     /** @param array<string, mixed> $message */
     private function startGroupActionJourney(User $user, array $message): bool
     {
-        $text = trim((string) (data_get($message, 'text.body') ?? ''));
+        $text = $this->inboundText($message);
         if ($text === '') {
             return false;
         }
@@ -423,7 +471,7 @@ class WhatsappConversationService
             }
         }
 
-        $this->whatsapp->sendText($user, $this->mainMenuMessage()."\n\nKwa kujiunga au kuona taarifa za mchezo, tuma msimbo wa mchezo uliopokea.");
+        $this->sendTemplateMessage($user, 'main_menu');
         $this->flowSessions->startGroupAction($user, 'await_group_code', []);
 
         return true;
@@ -437,7 +485,7 @@ class WhatsappConversationService
             return false;
         }
 
-        $text = trim((string) (data_get($message, 'text.body') ?? ''));
+        $text = $this->inboundText($message);
         $command = $this->command($message);
         $payload = $session->payload ?? [];
         $groupId = (string) ($payload['group_id'] ?? '');
@@ -561,7 +609,7 @@ class WhatsappConversationService
 
             $field = $this->editableGroupFieldFromNumber($text);
             if ($field === null) {
-                $this->whatsapp->sendText($user, 'Tuma namba ya taarifa unayotaka kubadili, kuanzia 1 hadi 11.');
+                $this->whatsapp->sendText($user, 'Tuma namba ya taarifa unayotaka kubadili, kuanzia 1 hadi 12.');
 
                 return true;
             }
@@ -788,16 +836,18 @@ class WhatsappConversationService
 
     private function mainMenuMessage(): string
     {
-        return "Karibu Kijumbe. Chagua huduma kwa kutuma moja ya maneno haya:\n\n"
-            ."UNDA KIKUNDI - Unda mchezo mpya wa michango\n"
-            ."BADILI TAARIFA - Badili mchezo unaoratibu\n"
-            ."LIPA - Lipa mchango wa mchezo mmoja au zaidi\n"
-            ."POKEA - Pokea marejesho yako siku yako ikifika\n"
-            ."NAMBA YA SIRI - Weka au badili namba ya siri ya kupokea fedha\n"
-            ."STATUS - Angalia mchango unaodaiwa\n"
-            ."TAARIFA - Pata ripoti ya waliolipa na waliopokea kwenye michezo yako\n"
-            ."KATISHA - Futa mchakato unaoendelea\n\n"
-            .'Kwa kujiunga, kulipa, au kuona taarifa za mchezo, tuma msimbo wa mchezo.';
+        return $this->messages->render('main_menu', []);
+    }
+
+    /** @param array<string, mixed> $variables */
+    private function sendTemplateMessage(User $user, string $key, array $variables = [], ?string $interactionKey = null): WhatsappMessage
+    {
+        $body = $this->messages->render($key, $variables);
+        $interaction = $this->messages->interaction($interactionKey ?? $key, $variables);
+
+        return $interaction
+            ? $this->whatsapp->sendInteractive($user, $body, $interaction)
+            : $this->whatsapp->sendText($user, $body);
     }
 
     private function startGroupEditFlow(User $user): void
@@ -819,23 +869,29 @@ class WhatsappConversationService
                 'group_id' => $group->id,
                 'group_code' => $group->group_code ?: $group->id,
             ]);
-            $this->whatsapp->sendText($user, "Mchezo: {$group->name}\n\n".$this->groupEditMenu());
+            $this->sendTemplateMessage($user, 'group_edit_start', [
+                'group_name' => $group->name,
+                'edit_menu' => $this->groupEditMenu(),
+            ]);
 
             return;
         }
 
         $groupIds = [];
-        $message = "Chagua mchezo unaotaka kubadili:\n";
+        $groupOptions = [];
         foreach ($groups as $index => $group) {
             $number = $index + 1;
             $groupIds[$number] = $group->id;
-            $message .= "{$number}. {$group->name}\n";
+            $groupOptions[] = [
+                'id' => (string) $number,
+                'title' => Str::limit($group->name, 24, ''),
+                'label' => $group->name,
+            ];
         }
-        $message .= 'Tuma namba ya mchezo.';
         $this->flowSessions->startGroupAction($user, 'choose_edit_group', [
             'edit_group_ids' => $groupIds,
         ]);
-        $this->whatsapp->sendText($user, $message);
+        $this->sendTemplateMessage($user, 'group_edit_select', ['groups' => $groupOptions]);
     }
 
     private function startFinancialReportFlow(User $user): void
@@ -850,13 +906,12 @@ class WhatsappConversationService
         $this->flowSessions->startFinancialReport($user, [
             'group_ids' => $groups->pluck('id')->values()->all(),
         ]);
-        $lines = ['Chagua mchezo unaotaka kuona taarifa:'];
-        foreach ($groups as $index => $group) {
-            $lines[] = ($index + 1).". {$group->name}";
-        }
-        $lines[] = '';
-        $lines[] = 'Tuma namba ya mchezo.';
-        $this->whatsapp->sendText($user, implode("\n", $lines));
+        $groupOptions = $groups->values()->map(fn (Group $group, int $index): array => [
+            'id' => (string) ($index + 1),
+            'title' => Str::limit($group->name, 24, ''),
+            'label' => $group->name,
+        ])->all();
+        $this->sendTemplateMessage($user, 'report_start', ['groups' => $groupOptions]);
     }
 
     /** @param array<string, mixed> $message */
@@ -867,7 +922,7 @@ class WhatsappConversationService
             return false;
         }
 
-        $choice = trim((string) (data_get($message, 'text.body') ?? ''));
+        $choice = $this->inboundText($message);
         if (! ctype_digit($choice)) {
             $this->whatsapp->sendText($user, 'Tuma namba ya chaguo lililo kwenye orodha ya taarifa.');
 
@@ -979,9 +1034,9 @@ class WhatsappConversationService
         return [
             '1' => 'group_name', '2' => 'member_slots', '3' => 'group_type',
             '4' => 'leader_name', '5' => 'contribution_amount',
-            '6' => 'contribution_interval_days', '7' => 'payout_interval_days',
-            '8' => 'cycle_starts_at', '9' => 'kijumbe_fee',
-            '10' => 'penalty_amount', '11' => 'penalty_timing_hours',
+            '6' => 'contribution_interval_days', '7' => 'payout_mode',
+            '8' => 'payout_interval_days', '9' => 'cycle_starts_at',
+            '10' => 'kijumbe_fee', '11' => 'penalty_amount', '12' => 'penalty_timing_hours',
         ][trim($text)] ?? null;
     }
 
@@ -990,8 +1045,9 @@ class WhatsappConversationService
         return "Chagua taarifa ya mchezo unayotaka kubadili:\n"
             ."1. Jina la mchezo\n2. Idadi ya washiriki\n3. Aina ya mchezo (Bidhaa/Pesa)\n"
             ."4. Jina la Kijumbe\n5. Kiasi cha mchango kwa jina\n6. Mchango kila baada ya siku\n"
-            ."7. Marejesho kila baada ya siku\n8. Tarehe ya kuanza\n9. Ada ya Kijumbe\n"
-            ."10. Faini\n11. Muda wa kuanza faini\n\nTuma namba ya taarifa unayotaka kubadili.";
+            ."7. Namna ya marejesho\n8. Marejesho kila baada ya siku (kwa zamu)\n"
+            ."9. Tarehe ya kuanza\n10. Ada ya Kijumbe\n11. Faini\n12. Muda wa kuanza faini\n\n"
+            .'Tuma namba ya taarifa unayotaka kubadili.';
     }
 
     private function sendGroupEditQuestion(User $user, string $field): void
@@ -1003,6 +1059,7 @@ class WhatsappConversationService
             'leader_name' => 'Tuma jina jipya la Kijumbe.',
             'contribution_amount' => 'Tuma kiasi kipya cha mchango kwa kila jina.',
             'contribution_interval_days' => 'Tuma baada ya siku ngapi mchango ulipwe.',
+            'payout_mode' => 'Chagua namna mpya ya marejesho: 1) Kawaida kwa zamu  2) Majina yote mwisho wa mchezo.',
             'payout_interval_days' => 'Tuma baada ya siku ngapi mwanachama apokee marejesho.',
             'cycle_starts_at' => 'Tuma tarehe mpya ya kuanza, mfano 2026-09-20 08:00.',
             'kijumbe_fee' => 'Tuma ada mpya ya Kijumbe kwa kila jina. Ada hii itakatwa kwenye marejesho, au tuma 0 kama hakuna.',
@@ -1020,6 +1077,10 @@ class WhatsappConversationService
             $locked = Group::query()->whereKey($group->id)->lockForUpdate()->firstOrFail();
             if (! $this->financialReports->isCoordinator($user, $locked)) {
                 throw new \RuntimeException('Ni Kijumbe wa mchezo pekee anayeweza kubadili taarifa za mchezo.');
+            }
+
+            if ($field === 'payout_mode' && $locked->cycle_starts_at && now()->gte($locked->cycle_starts_at)) {
+                throw new \RuntimeException('Namna ya marejesho haiwezi kubadilishwa baada ya mchezo kuanza.');
             }
 
             if (in_array($field, ['member_slots', 'cycle_starts_at'], true) && $this->groupHasFinancialActivity($locked)) {
@@ -1040,6 +1101,7 @@ class WhatsappConversationService
                 'leader_name' => ['leader_name' => $value],
                 'contribution_amount' => ['contribution_amount' => (int) $value, 'amount_per_day' => (int) $value],
                 'contribution_interval_days' => ['contribution_interval_days' => (int) $value, 'period_days' => (int) $value],
+                'payout_mode' => ['payout_mode' => Group::normalizePayoutMode($value)],
                 'payout_interval_days' => ['payout_interval_days' => (int) $value],
                 'cycle_starts_at' => ['cycle_starts_at' => $value],
                 'kijumbe_fee' => ['kijumbe_fee' => (int) $value],
@@ -1070,6 +1132,7 @@ class WhatsappConversationService
         if (in_array($field, [
             'contribution_amount',
             'contribution_interval_days',
+            'payout_mode',
             'payout_interval_days',
             'cycle_starts_at',
             'kijumbe_fee',
@@ -1127,6 +1190,7 @@ class WhatsappConversationService
             'leader_name' => 'Jina la Kijumbe',
             'contribution_amount' => 'Kiasi cha mchango kwa jina',
             'contribution_interval_days' => 'Muda kati ya michango',
+            'payout_mode' => 'Namna ya marejesho',
             'payout_interval_days' => 'Muda kati ya marejesho',
             'cycle_starts_at' => 'Tarehe ya kuanza',
             'kijumbe_fee' => 'Ada ya Kijumbe kwa jina',
@@ -1151,6 +1215,11 @@ class WhatsappConversationService
         }
         if ($field === 'group_type') {
             return Group::normalizeGroupType((string) $value) === Group::TYPE_PRODUCT ? 'Bidhaa' : 'Pesa';
+        }
+        if ($field === 'payout_mode') {
+            return Group::normalizePayoutMode($value) === Group::PAYOUT_MODE_END_OF_GAME
+                ? 'Majina yote mwisho wa mchezo'
+                : 'Kawaida kwa zamu';
         }
 
         return (string) $value;
@@ -1189,16 +1258,51 @@ class WhatsappConversationService
     private function startPaymentFlow(User $user): void
     {
         $this->flowSessions->startPayment($user);
-        $this->whatsapp->sendText($user, "Unalipia nani?\n1. Mimi\n2. Mtu mwingine\n\nTuma 1 au 2.");
+        $this->sendTemplateMessage($user, 'payment_start');
     }
 
     private function startPayoutFlow(User $user): void
     {
-        $payout = Payout::query()
+        $this->goodsPayouts->aggregateFor($user);
+        $payouts = $this->availablePayouts($user)->take(10);
+
+        if ($payouts->isEmpty()) {
+            $this->sendTemplateMessage($user, 'payout_unavailable');
+
+            return;
+        }
+
+        if ($payouts->count() > 1) {
+            $session = $this->flowSessions->startPayout($user, ['payout_ids' => $payouts->pluck('id')->all()]);
+            $this->flowSessions->advance($session, 'choose_payout', ['payout_ids' => $payouts->pluck('id')->all()]);
+            $this->whatsapp->sendInteractive($user, 'Chagua mchezo au malipo unayotaka kupokea:', [
+                'type' => 'list', 'button_text' => 'Chagua mchezo',
+                'options' => $payouts->map(function (Payout $payout): array {
+                    $group = $payout->round?->cycle?->group ?? $payout->cycle?->group;
+                    return ['id' => (string) $payout->id, 'title' => Str::limit($group?->name ?: 'Malipo', 24, ''),
+                        'description' => 'TZS '.number_format((int) $payout->amount).' - '.($payout->isGoodsProceeds() ? 'Bidhaa' : 'Pesa')];
+                })->all(),
+            ]);
+            return;
+        }
+
+        $this->beginPayout($user, $payouts->first());
+    }
+
+    private function availablePayouts(User $user): Collection
+    {
+        return Payout::query()
             ->with(['round.cycle.group', 'cycle.group'])
-            ->whereIn('status', ['pending', 'approved'])
+            ->where(function ($query): void {
+                $query->whereIn('status', ['pending', 'approved'])
+                    ->orWhere(fn ($query) => $query->where('purpose', Payout::PURPOSE_GOODS_PROCEEDS)->where('status', 'failed'));
+            })
+            ->whereNull('goods_aggregate_payout_id')
             ->where(function ($query): void {
                 $query->where('purpose', Payout::PURPOSE_COORDINATOR_FEE)
+                    ->orWhere(fn ($query) => $query
+                        ->where('purpose', Payout::PURPOSE_GOODS_PROCEEDS)
+                        ->whereNull('round_id'))
                     ->orWhereHas('round', fn ($query) => $query->where('status', 'ready_for_payout'));
             })
             ->where(function ($query) use ($user): void {
@@ -1206,17 +1310,56 @@ class WhatsappConversationService
                     ->orWhereHas('recipient.groupMember', fn ($query) => $query->where('user_id', $user->id));
             })
             ->oldest('created_at')
-            ->first();
+            ->get();
+    }
 
-        if (! $payout) {
-            $this->whatsapp->sendText($user, 'Hakuna malipo ya kupokea yaliyo tayari kwa sasa. Tutakutumia ujumbe siku yako ya kupokea ikifika.');
+    private function beginPayout(User $user, Payout $payout): void
+    {
+        if ($payout->isGoodsProceeds() && (string) $payout->status->value === 'failed') {
+            $payout->update(['status' => 'pending', 'failure_reason' => null]);
+            $payout->verification()->delete();
+        }
+
+        $group = $payout->round?->cycle?->group ?? $payout->cycle?->group;
+        if ($group && $group->isProductGroup() && ! $payout->isGoodsProceeds()) {
+            $this->flowSessions->startPayout($user, ['payout_id' => $payout->id]);
+            $session = $this->flowSessions->resume($user, WhatsappFlowSessionService::PAYOUT);
+            $this->flowSessions->advance($session, 'await_goods_receipt_confirmation', ['payout_id' => $payout->id]);
+            $this->whatsapp->sendInteractive($user,
+                "Siku yako ya kupokea bidhaa katika {$group->name} imefika. Je, umepokea bidhaa zako?",
+                ['type' => 'buttons', 'options' => [
+                    ['id' => 'NDIO', 'title' => 'Nimepokea'],
+                    ['id' => 'HAPANA', 'title' => 'Sijapokea'],
+                ]],
+            );
 
             return;
         }
 
         $this->flowSessions->startPayout($user, ['payout_id' => $payout->id]);
-        $label = $payout->isCoordinatorFee() ? 'ada yako ya Kijumbe' : 'marejesho yako';
-        $this->whatsapp->sendText($user, 'Tuma namba ya simu utakayotumia kupokea '.$label.' ya TZS '.number_format((int) $payout->amount).'. Mfano 0748281701. Tuma KATISHA ukitaka kuacha.');
+        if ($payout->isGoodsAggregate()) {
+            $items = $this->goodsPayouts->summary($payout);
+            $lines = $items->map(fn (array $item, int $index): string => ($index + 1).'. '.$item['name']
+                .' - mzunguko '.$item['round'].' - TZS '.number_format($item['amount']));
+            $this->whatsapp->sendText(
+                $user,
+                "MUHTASARI WA BIDHAA ZILIZOTHIBITISHWA\n"
+                .'Mchezo: '.($group?->name ?: 'Mchezo wa bidhaa')."\n"
+                ."Wanachama waliothibitisha: {$items->count()}\n\n"
+                .$lines->implode("\n")."\n\n"
+                .'Jumla ya michango halisi utakayopokea: TZS '.number_format((int) $payout->amount)."\n"
+                .'Ada na faini hazijajumuishwa kwenye malipo haya.',
+            );
+        }
+        $label = match (true) {
+            $payout->isCoordinatorFee() => 'ada yako ya Kijumbe',
+            $payout->isGoodsProceeds() => 'michango ya bidhaa iliyothibitishwa',
+            default => 'marejesho yako',
+        };
+        $this->sendTemplateMessage($user, 'payout_phone_prompt', [
+            'payout_label' => $label,
+            'amount' => number_format((int) $payout->amount),
+        ]);
     }
 
     /** @param array<string, mixed> $message */
@@ -1227,8 +1370,23 @@ class WhatsappConversationService
             return false;
         }
 
-        $text = trim((string) (data_get($message, 'text.body') ?? ''));
+        $text = $this->inboundText($message);
         $payload = $session->payload ?? [];
+        if ($session->step_key === 'choose_payout') {
+            if (! in_array((int) $text, array_map('intval', $payload['payout_ids'] ?? []), true)) {
+                $this->whatsapp->sendText($user, 'Chaguo hilo halipatikani. Tuma POKEA uanze tena.');
+                return true;
+            }
+            $payout = $this->availablePayouts($user)->firstWhere('id', (int) $text);
+            if (! $payout) {
+                $this->flowSessions->complete($session);
+                $this->whatsapp->sendText($user, 'Malipo hayo hayapatikani tena. Tuma POKEA kuangalia mengine.');
+                return true;
+            }
+            $this->flowSessions->complete($session);
+            $this->beginPayout($user, $payout);
+            return true;
+        }
         $payout = Payout::query()->with(['round.cycle.group', 'cycle.group'])->find($payload['payout_id'] ?? null);
         if (! $payout) {
             $this->flowSessions->complete($session);
@@ -1238,6 +1396,52 @@ class WhatsappConversationService
         }
 
         try {
+            if ($session->step_key === 'await_goods_receipt_confirmation') {
+                if (! in_array(strtoupper($text), ['NDIO', 'NDIYO', 'YES', '1'], true)) {
+                    if (in_array(strtoupper($text), ['HAPANA', 'NO', '2'], true)) {
+                        $this->flowSessions->complete($session);
+                        $this->whatsapp->sendText($user, 'Uthibitisho umesitishwa. Tuma POKEA baada ya kupokea bidhaa zako.');
+                    } else {
+                        $this->whatsapp->sendText($user, 'Chagua NIMEPOKEA kuthibitisha au SIJAPOKEA kusitisha.');
+                    }
+
+                    return true;
+                }
+
+                $payout = DB::transaction(function () use ($payout, $user): Payout {
+                    $locked = Payout::query()->with('round.cycle.group')->lockForUpdate()->findOrFail($payout->id);
+                    $group = $locked->round?->cycle?->group;
+                    if (! $group || ! $group->isProductGroup()
+                        || (int) $locked->recipient?->groupMember?->user_id !== (int) $user->id) {
+                        throw new \RuntimeException('Uthibitisho wa bidhaa haulingani na mpokeaji wa mzunguko huu.');
+                    }
+
+                    $locked->update([
+                        'purpose' => Payout::PURPOSE_GOODS_PROCEEDS,
+                        'recipient_cycle_member_id' => null,
+                        'recipient_user_id' => $group->created_by,
+                        'amount' => (int) $locked->round->collected_amount,
+                        'gross_amount' => (int) $locked->round->collected_amount,
+                        'kijumbe_fee_amount' => 0,
+                        'platform_fee_amount' => 0,
+                        'coordinator_fee_amount' => 0,
+                        'destination_phone' => null,
+                        'notes' => 'Goods receipt confirmed by member '.$user->id.'. Principal only.',
+                    ]);
+
+                    return $locked->fresh('recipientUser', 'round.cycle.group');
+                });
+
+                $this->flowSessions->complete($session);
+                $this->whatsapp->sendText($user, 'Asante. Tumethibitisha kuwa umepokea bidhaa zako. Kijumbe amearifiwa kupokea michango iliyothibitishwa.');
+                if ($payout->recipientUser) {
+                    $this->whatsapp->sendText($payout->recipientUser,
+                        "Mwanachama amethibitisha kupokea bidhaa katika {$payout->round->cycle->group->name}. Principal inayopatikana: TZS ".number_format((int) $payout->amount).'. Tuma POKEA kuanza uthibitisho wa namba, OTP na namba ya siri.');
+                }
+
+                return true;
+            }
+
             if ($session->step_key === 'await_payment_phone') {
                 $this->payoutSecurity->start($payout, $user, $text);
                 $this->flowSessions->advance($session, 'await_payout_otp', $payload);
@@ -1367,9 +1571,10 @@ class WhatsappConversationService
     {
         $step = $user->hasPayoutPin() ? 'await_old_pin' : 'await_new_pin';
         $this->flowSessions->startPinManagement($user, $step);
-        $this->whatsapp->sendText($user, $user->hasPayoutPin()
-            ? 'Tuma namba yako ya siri ya sasa ili kuibadilisha.'
-            : 'Hujaweka namba ya siri. Tuma namba mpya ya tarakimu 4 hadi 6.');
+        $this->sendTemplateMessage($user,
+            $user->hasPayoutPin() ? 'pin_existing_start' : 'pin_new_start',
+            [],
+        );
     }
 
     /** @param array<string, mixed> $message */
@@ -1380,7 +1585,7 @@ class WhatsappConversationService
             return false;
         }
 
-        $text = trim((string) (data_get($message, 'text.body') ?? ''));
+        $text = $this->inboundText($message);
         $payload = $session->payload ?? [];
 
         if ($session->step_key === 'await_old_pin') {
@@ -1464,7 +1669,7 @@ class WhatsappConversationService
             return false;
         }
 
-        $text = trim((string) (data_get($message, 'text.body') ?? ''));
+        $text = $this->inboundText($message);
         $payload = $session->payload ?? [];
         $groupId = (string) ($payload['group_id'] ?? '');
         $group = $groupId !== '' ? Group::query()->find($groupId) : null;
@@ -1612,7 +1817,7 @@ class WhatsappConversationService
 
     private function paymentDebtSummary(Group $group, Collection $obligations): string
     {
-        $lines = ["Deni la {$group->name} kwa mizunguko:"];
+        $lines = [];
         foreach ($obligations->groupBy('round_number') as $round => $roundObligations) {
             $lines[] = "Mzunguko {$round}:";
             foreach ($roundObligations as $obligation) {
@@ -1622,10 +1827,12 @@ class WhatsappConversationService
             }
         }
         $total = $obligations->sum(fn ($obligation) => max((int) $obligation->principal_amount + (int) $obligation->kijumbe_fee_amount + (int) $obligation->penalty_amount - (int) $obligation->paid_amount, 0));
-        $lines[] = 'Jumla ya deni: TZS '.number_format($total);
-        $lines[] = 'Kiasi utakacholipa kitatumika kwanza kwenye mzunguko wa zamani zaidi; kikizidi, salio litatumika kwenye mizunguko inayofuata.';
 
-        return implode("\n", $lines);
+        return $this->messages->render('payment_debt_summary', [
+            'group_name' => $group->name,
+            'debt_breakdown' => implode("\n", $lines),
+            'total_debt' => number_format($total),
+        ]);
     }
 
     private function sendGroupCreatedMessages(User $user, Group $group): void
@@ -1655,12 +1862,20 @@ class WhatsappConversationService
     /** @param array<string, mixed> $message */
     private function command(array $message): string
     {
-        $text = data_get($message, 'text.body')
-            ?? data_get($message, 'interactive.button_reply.id')
+        return strtoupper($this->inboundText($message));
+    }
+
+    /** @param array<string, mixed> $message */
+    private function inboundText(array $message): string
+    {
+        $text = data_get($message, 'interactive.button_reply.id')
             ?? data_get($message, 'interactive.list_reply.id')
+            ?? data_get($message, 'button.payload')
+            ?? data_get($message, 'button.text')
+            ?? data_get($message, 'text.body')
             ?? '';
 
-        return strtoupper(trim((string) $text));
+        return trim((string) $text);
     }
 
     private function digitsOnly(string $value): ?int

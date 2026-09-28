@@ -56,6 +56,7 @@ class GroupFlowService
         $periodDays = $this->frequencyDays($paymentFrequency, $legacyPeriodDays);
         $payoutIntervalDays = $this->intOrNull($response, ['payout_interval_days', 'payout_frequency_days', 'siku_za_malipo']);
         $payoutIntervalDays ??= $periodDays;
+        $payoutMode = Group::normalizePayoutMode(Arr::get($response, 'payout_mode', Group::PAYOUT_MODE_ROTATING));
         $kijumbeFee = $this->intOrNull($response, ['kijumbe_fee', 'platform_fee_amount', 'ada_ya_jukwaa', 'fee']);
         $platformFeePercent = max(0, min(100, $this->intOrNull($response, ['platform_fee_percent']) ?? (int) config('kijumbe.platform_fee_percent', 30)));
         $penaltyAmount = $this->intOrNull($response, ['penalty_amount', 'faini']);
@@ -81,6 +82,7 @@ class GroupFlowService
             $contributionAmount,
             $paymentFrequency,
             $payoutIntervalDays,
+            $payoutMode,
             $memberSlots,
             $periodDays,
             $gracePeriodHours,
@@ -113,6 +115,7 @@ class GroupFlowService
                 'contribution_interval_days' => $periodDays,
                 'payment_frequency' => $paymentFrequency,
                 'payout_interval_days' => $payoutIntervalDays,
+                'payout_mode' => $payoutMode,
                 'member_slots' => $memberSlots,
                 'cycle_starts_at' => $cycleStartsAt,
                 'payout_order' => $payoutOrder !== '' ? $payoutOrder : null,
@@ -126,26 +129,24 @@ class GroupFlowService
                 'flow_payload' => $response,
             ]);
 
-            GroupMember::create([
-                'group_id' => $group->id,
-                'user_id' => $user->id,
-                'member_name' => $leaderName,
-                'majina_count' => 1,
-                'role' => GroupRole::Coordinator,
-                'is_active' => true,
-                'joined_at' => now(),
-            ]);
+            if ($groupType !== Group::TYPE_PRODUCT) {
+                $leaderMembership = GroupMember::create([
+                    'group_id' => $group->id,
+                    'user_id' => $user->id,
+                    'member_name' => $leaderName,
+                    'majina_count' => 1,
+                    'role' => GroupRole::Coordinator,
+                    'is_active' => true,
+                    'joined_at' => now(),
+                ]);
 
-            $leaderMembership = GroupMember::query()
-                ->where('group_id', $group->id)
-                ->where('user_id', $user->id)
-                ->firstOrFail();
-            GroupMemberSlot::create([
-                'group_id' => $group->id,
-                'group_member_id' => $leaderMembership->id,
-                'slot_number' => 1,
-                'status' => 'active',
-            ]);
+                GroupMemberSlot::create([
+                    'group_id' => $group->id,
+                    'group_member_id' => $leaderMembership->id,
+                    'slot_number' => 1,
+                    'status' => 'active',
+                ]);
+            }
 
             return $group;
         });

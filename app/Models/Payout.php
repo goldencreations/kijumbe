@@ -7,6 +7,7 @@ use App\Services\PhoneNumber;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
+use Illuminate\Database\Eloquent\Relations\HasMany;
 use Illuminate\Database\Eloquent\Relations\HasOne;
 
 class Payout extends Model
@@ -17,6 +18,8 @@ class Payout extends Model
 
     public const PURPOSE_COORDINATOR_FEE = 'coordinator_fee';
 
+    public const PURPOSE_GOODS_PROCEEDS = 'goods_proceeds';
+
     protected $appends = ['destination_phone_local'];
 
     public function getDestinationPhoneLocalAttribute(): ?string
@@ -25,7 +28,7 @@ class Payout extends Model
     }
 
     protected $fillable = [
-        'purpose', 'round_id', 'cycle_id', 'recipient_cycle_member_id', 'recipient_user_id', 'amount',
+        'purpose', 'round_id', 'cycle_id', 'goods_aggregate_payout_id', 'recipient_cycle_member_id', 'recipient_user_id', 'amount',
         'gross_amount', 'kijumbe_fee_amount', 'platform_fee_amount', 'coordinator_fee_amount', 'status',
         'payment_reference', 'destination_phone', 'provider', 'order_reference',
         'provider_reference', 'idempotency_key', 'processed_by', 'requested_by', 'approved_by',
@@ -69,9 +72,29 @@ class Payout extends Model
         return $this->belongsTo(User::class, 'recipient_user_id');
     }
 
+    public function goodsAggregate(): BelongsTo
+    {
+        return $this->belongsTo(self::class, 'goods_aggregate_payout_id');
+    }
+
+    public function goodsSources(): HasMany
+    {
+        return $this->hasMany(self::class, 'goods_aggregate_payout_id');
+    }
+
+    public function isGoodsAggregate(): bool
+    {
+        return $this->isGoodsProceeds() && $this->round_id === null && $this->goodsSources()->exists();
+    }
+
     public function isCoordinatorFee(): bool
     {
         return $this->purpose === self::PURPOSE_COORDINATOR_FEE;
+    }
+
+    public function isGoodsProceeds(): bool
+    {
+        return $this->purpose === self::PURPOSE_GOODS_PROCEEDS;
     }
 
     public function processor(): BelongsTo

@@ -17,8 +17,8 @@
                 <a href="{{ $key === 'overview' ? route('admin.dashboard') : route('admin.list', $key) }}" class="nav-link {{ $page === $key ? 'active' : '' }}" @if($page === $key) aria-current="page" @endif><i data-lucide="{{ $icon }}"></i>{{ $label }}</a>
             @endforeach
             <p class="nav-label nav-label-spaced">OPERATIONS</p>
-            @foreach (['whatsapp' => ['WhatsApp', 'message-circle'], 'audit' => ['Audit history', 'history']] as $key => [$label, $icon])
-                <a href="{{ route('admin.list', $key) }}" class="nav-link {{ $page === $key ? 'active' : '' }}" @if($page === $key) aria-current="page" @endif><i data-lucide="{{ $icon }}"></i>{{ $label }}</a>
+            @foreach (['whatsapp' => ['WhatsApp', 'message-circle', route('admin.list', 'whatsapp')], 'whatsapp-templates' => ['Message templates', 'message-square-text', route('admin.whatsapp.templates')], 'audit' => ['Audit history', 'history', route('admin.list', 'audit')]] as $key => [$label, $icon, $href])
+                <a href="{{ $href }}" class="nav-link {{ $page === $key ? 'active' : '' }}" @if($page === $key) aria-current="page" @endif><i data-lucide="{{ $icon }}"></i>{{ $label }}</a>
             @endforeach
         </nav>
         <div class="sidebar-bottom"><span class="small-label">TIME ZONE</span><p>Dar es Salaam <span>EAT</span></p></div>

@@ -340,7 +340,6 @@ class AdminDashboardController extends Controller
             'group', 'members.groupMember.user', 'rounds.recipient.groupMember.user',
             'rounds.contributions.cycleMember.groupMember.user', 'rounds.contributions.paymentAttempts', 'rounds.payout', 'rounds.decisions.decider',
         ]);
-
         return view('admin.cycle', [
             'page' => 'groups',
             'title' => $cycle->name,
