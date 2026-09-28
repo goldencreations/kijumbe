@@ -99,13 +99,14 @@ class MichezoPayoutSyncService
                 $cycleMembers->put($slot->id, $cycleMember);
             }
 
+            $expectedRounds = $slots->count();
             $roundNumbers = MemberPaymentObligation::query()
                 ->where('group_id', $group->id)
+                ->where('round_number', '<=', $expectedRounds)
                 ->distinct()
                 ->orderBy('round_number')
                 ->pluck('round_number');
 
-            $expectedRounds = $slots->count();
             $endOfGameDueAt = $startsAt->copy()->addDays(
                 ($expectedRounds - 1) * max((int) ($group->contribution_interval_days ?: $group->period_days ?: 1), 1),
             );

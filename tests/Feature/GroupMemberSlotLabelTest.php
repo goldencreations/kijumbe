@@ -66,6 +66,20 @@ class GroupMemberSlotLabelTest extends TestCase
         Carbon::setTestNow();
     }
 
+    public function test_contribution_rounds_cover_the_full_payout_schedule(): void
+    {
+        Carbon::setTestNow('2026-09-27 09:00:00');
+        $group = $this->utwahStyleGroup();
+        $group->update(['cycle_starts_at' => now()->subDays(13)]);
+
+        app(MemberPaymentLedgerService::class)->materialize($group->fresh());
+
+        $obligations = MemberPaymentObligation::query()->where('group_id', $group->id);
+        $this->assertSame(14, (int) (clone $obligations)->max('round_number'));
+        $this->assertSame(98, (clone $obligations)->count());
+        Carbon::setTestNow();
+    }
+
     private function utwahStyleGroup(): Group
     {
         $creator = User::factory()->create();

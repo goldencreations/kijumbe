@@ -211,9 +211,14 @@ class MemberPaymentLedgerService
         $interval = max((int) ($group->contribution_interval_days ?: $group->period_days ?: 1), 1);
         $elapsedSeconds = max((int) $startsAt->diffInSeconds($materializeUntil, false), 0);
         $rounds = intdiv($elapsedSeconds, $interval * 86400) + 1;
-        if ($group->member_slots !== null) {
-            $rounds = min($rounds, $activeSlots->count());
+        $payoutMode = Group::normalizePayoutMode($group->payout_mode);
+        $maximumRounds = $activeSlots->count();
+        if ($payoutMode !== Group::PAYOUT_MODE_END_OF_GAME) {
+            $payoutInterval = max((int) ($group->payout_interval_days ?: 1), 1);
+            $contributionsPerPayout = max((int) ceil($payoutInterval / $interval), 1);
+            $maximumRounds *= $contributionsPerPayout;
         }
+        $rounds = min($rounds, $maximumRounds);
         $principal = (int) ($group->contribution_amount ?? $group->amount_per_day ?? 0);
         $platformPercent = (int) ($group->platform_fee_percent ?? config('kijumbe.platform_fee_percent', 30));
         $penalty = (int) ($group->penalty_amount ?? 0);
