@@ -6,6 +6,7 @@ use App\Enums\PayoutStatus;
 use App\Enums\RoundStatus;
 use App\Models\Payout;
 use App\Models\Round;
+use App\Services\GoodsPayoutNotificationService;
 use App\Services\MemberPaymentLedgerService;
 use App\Services\PhoneNumber;
 use App\Services\Whatsapp\MetaWhatsAppClient;
@@ -23,15 +24,15 @@ class NotifyDuePayouts extends Command
         MetaWhatsAppClient $whatsapp,
         PhoneNumber $phones,
         MemberPaymentLedgerService $ledger,
+        GoodsPayoutNotificationService $goodsNotifications,
     ): int {
         $created = 0;
 
         Round::query()
             ->with(['cycle.group', 'recipient.groupMember.user'])
             ->where('status', RoundStatus::ReadyForPayout->value)
-            ->whereDoesntHave('payout')
             ->where('due_at', '<=', now())
-            ->chunkById(50, function ($rounds) use ($whatsapp, $phones, $ledger, &$created): void {
+            ->chunkById(50, function ($rounds) use ($whatsapp, $phones, $ledger, $goodsNotifications, &$created): void {
                 foreach ($rounds as $round) {
                     $user = $round->recipient?->groupMember?->user;
                     if (! $user || ! $user->is_active) {
@@ -79,18 +80,15 @@ class NotifyDuePayouts extends Command
                         ],
                     );
 
-                    if (! $payout->wasRecentlyCreated) {
-                        continue;
-                    }
-
                     $groupName = $round->cycle?->group?->name ?: 'kikundi chako';
                     if ($round->cycle?->group?->isProductGroup()) {
-                        $whatsapp->sendText(
-                            $user,
-                            "Siku yako ya kupokea bidhaa katika {$groupName} imefika. Baada ya kupokea bidhaa, tuma POKEA na uthibitishe. Kijumbe atalipwa principal iliyokusanywa baada ya uthibitisho wako.",
-                        );
-                        $created++;
+                        if ($payout->purpose === Payout::PURPOSE_MEMBER && $goodsNotifications->remindRecipient($payout)) {
+                            $created++;
+                        }
 
+                        continue;
+                    }
+                    if (! $payout->wasRecentlyCreated && $payout->ready_notified_at) {
                         continue;
                     }
                     $whatsapp->sendText(
@@ -101,7 +99,22 @@ class NotifyDuePayouts extends Command
                             .'Utapokea: TZS '.number_format((int) $payout->amount)."\n\n"
                             .'Tuma POKEA kuanza uthibitisho. Utahitaji namba ya simu ya kupokea, msimbo wa SMS, na namba yako ya siri.',
                     );
+                    $payout->forceFill(['ready_notified_at' => now()])->save();
                     $created++;
+                }
+            });
+
+        Payout::query()
+            ->with(['recipientUser', 'round.cycle.group', 'round.recipient.groupMember'])
+            ->where('purpose', Payout::PURPOSE_GOODS_PROCEEDS)
+            ->whereNotNull('round_id')
+            ->whereNull('goods_coordinator_notified_at')
+            ->whereIn('status', [PayoutStatus::Pending->value, PayoutStatus::Approved->value])
+            ->chunkById(50, function ($payouts) use ($goodsNotifications, &$created): void {
+                foreach ($payouts as $payout) {
+                    if ($goodsNotifications->notifyCoordinator($payout)) {
+                        $created++;
+                    }
                 }
             });
 

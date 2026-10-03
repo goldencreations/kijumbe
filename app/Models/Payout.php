@@ -33,6 +33,7 @@ class Payout extends Model
         'payment_reference', 'destination_phone', 'provider', 'order_reference',
         'provider_reference', 'idempotency_key', 'processed_by', 'requested_by', 'approved_by',
         'processed_at', 'approved_at', 'initiated_at', 'ready_notified_at', 'notes', 'response_payload', 'failure_reason',
+        'goods_coordinator_notified_at',
     ];
 
     protected function casts(): array
@@ -48,6 +49,7 @@ class Payout extends Model
             'approved_at' => 'datetime',
             'initiated_at' => 'datetime',
             'ready_notified_at' => 'datetime',
+            'goods_coordinator_notified_at' => 'datetime',
             'response_payload' => 'array',
         ];
     }

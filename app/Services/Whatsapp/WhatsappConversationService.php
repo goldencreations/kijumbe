@@ -14,6 +14,7 @@ use App\Models\WhatsappFlowSession;
 use App\Models\WhatsappMessage;
 use App\Services\DailyContributionService;
 use App\Services\GoodsPayoutAggregationService;
+use App\Services\GoodsPayoutNotificationService;
 use App\Services\GroupFinancialReportService;
 use App\Services\MemberPaymentLedgerService;
 use App\Services\MichezoPayoutSyncService;
@@ -43,6 +44,7 @@ class WhatsappConversationService
         private readonly PayoutSecurityService $payoutSecurity,
         private readonly WhatsappMessageTemplateService $messages,
         private readonly GoodsPayoutAggregationService $goodsPayouts,
+        private readonly GoodsPayoutNotificationService $goodsNotifications,
     ) {}
 
     /** @param array<string, mixed> $message */
@@ -1448,12 +1450,7 @@ class WhatsappConversationService
 
                 $this->flowSessions->complete($session);
                 $this->whatsapp->sendText($user, 'Asante. Tumethibitisha kuwa umepokea bidhaa zako. Kijumbe amearifiwa kupokea michango iliyothibitishwa.');
-                if ($payout->recipientUser) {
-                    $this->whatsapp->sendText(
-                        $payout->recipientUser,
-                        "Mwanachama amethibitisha kupokea bidhaa katika {$payout->round->cycle->group->name}. Principal inayopatikana: TZS ".number_format((int) $payout->amount).'. Tuma POKEA kuanza uthibitisho wa namba, OTP na namba ya siri.',
-                    );
-                }
+                $this->goodsNotifications->notifyCoordinator($payout);
 
                 return true;
             }
