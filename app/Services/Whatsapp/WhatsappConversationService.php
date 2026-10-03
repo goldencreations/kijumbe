@@ -1449,8 +1449,16 @@ class WhatsappConversationService
                 });
 
                 $this->flowSessions->complete($session);
-                $this->whatsapp->sendText($user, 'Asante. Tumethibitisha kuwa umepokea bidhaa zako. Kijumbe amearifiwa kupokea michango iliyothibitishwa.');
-                $this->goodsNotifications->notifyCoordinator($payout);
+                $this->whatsapp->sendText($user, 'Asante. Tumethibitisha kuwa umepokea bidhaa zako. Kijumbe ataarifiwa kupokea michango iliyothibitishwa.');
+                try {
+                    $this->goodsNotifications->notifyCoordinator($payout);
+                } catch (\Throwable $exception) {
+                    Log::warning('Kijumbe goods confirmation notification will be retried.', [
+                        'payout_id' => $payout->id,
+                        'exception' => $exception::class,
+                        'error' => $exception->getMessage(),
+                    ]);
+                }
 
                 return true;
             }
