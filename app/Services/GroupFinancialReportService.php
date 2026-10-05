@@ -198,7 +198,17 @@ class GroupFinancialReportService
      *     paid_total: int,
      *     member_count: int,
      *     paid_amount_per_member: int|null,
-     *     members: array<int, array{paid_amount: int, principal_amount: int, fee_amount: int, penalty_amount: int}>
+     *     members: array<int, array{
+     *         paid_amount: int,
+     *         expected_amount: int,
+     *         principal_amount: int,
+     *         fee_amount: int,
+     *         penalty_amount: int,
+     *         paid_principal_amount: int,
+     *         paid_fee_amount: int,
+     *         paid_penalty_amount: int,
+     *         slot_count: int
+     *     }>
      * }>
      */
     public function cycleRoundLedgerTotals(Cycle $cycle): array
@@ -212,12 +222,39 @@ class GroupFinancialReportService
             return [];
         }
 
-        $rows = DB::table('payment_allocations as allocations')
+        $isEndOfGamePayout = Group::normalizePayoutMode($cycle->group->payout_mode) === Group::PAYOUT_MODE_END_OF_GAME;
+        $contributionInterval = max((int) ($cycle->group->contribution_interval_days ?: $cycle->group->period_days ?: 1), 1);
+        $payoutInterval = max((int) ($cycle->group->payout_interval_days ?: 1), 1);
+        $contributionsPerPayout = $isEndOfGamePayout ? 1 : max((int) ceil($payoutInterval / $contributionInterval), 1);
+        $sourceRoundNumbers = $isEndOfGamePayout
+            ? $roundNumbers
+            : range(1, max($roundNumbers) * $contributionsPerPayout);
+        $payoutRoundFor = fn (int $sourceRound): int => $isEndOfGamePayout
+            ? $sourceRound
+            : intdiv($sourceRound - 1, $contributionsPerPayout) + 1;
+
+        $obligationRows = DB::table('member_payment_obligations as obligations')
+            ->join('group_member_slots as slots', 'slots.id', '=', 'obligations.group_member_slot_id')
+            ->where('obligations.group_id', $cycle->group_id)
+            ->whereIn('obligations.round_number', $sourceRoundNumbers)
+            ->select([
+                'obligations.round_number',
+                'slots.group_member_id',
+                DB::raw('COUNT(DISTINCT obligations.group_member_slot_id) as slot_count'),
+                DB::raw('COALESCE(SUM(obligations.principal_amount), 0) as principal_amount'),
+                DB::raw('COALESCE(SUM(obligations.kijumbe_fee_amount), 0) as fee_amount'),
+                DB::raw('COALESCE(SUM(obligations.penalty_amount), 0) as penalty_amount'),
+            ])
+            ->groupBy('obligations.round_number', 'slots.group_member_id')
+            ->orderBy('obligations.round_number')
+            ->get();
+
+        $paymentRows = DB::table('payment_allocations as allocations')
             ->join('payment_attempts as attempts', 'attempts.id', '=', 'allocations.payment_attempt_id')
             ->join('member_payment_obligations as obligations', 'obligations.id', '=', 'allocations.member_payment_obligation_id')
             ->join('group_member_slots as slots', 'slots.id', '=', 'obligations.group_member_slot_id')
             ->where('obligations.group_id', $cycle->group_id)
-            ->whereIn('obligations.round_number', $roundNumbers)
+            ->whereIn('obligations.round_number', $sourceRoundNumbers)
             ->where('attempts.status', PaymentAttemptStatus::Successful->value)
             ->select([
                 'obligations.round_number',
@@ -229,21 +266,63 @@ class GroupFinancialReportService
             ])
             ->groupBy('obligations.round_number', 'slots.group_member_id')
             ->orderBy('obligations.round_number')
-            ->get()
-            ->groupBy('round_number');
+            ->get();
 
-        return $rows->mapWithKeys(function ($members, $roundNumber): array {
-            $memberTotals = $members->mapWithKeys(fn ($member): array => [(int) $member->group_member_id => [
-                'paid_amount' => (int) $member->paid_amount,
-                'principal_amount' => (int) $member->principal_amount,
-                'fee_amount' => (int) $member->fee_amount,
-                'penalty_amount' => (int) $member->penalty_amount,
-            ]])->all();
+        $memberTotalsByRound = [];
+        foreach ($obligationRows as $member) {
+            $roundNumber = $payoutRoundFor((int) $member->round_number);
+            if (! in_array($roundNumber, $roundNumbers, true)) {
+                continue;
+            }
+
+            $memberId = (int) $member->group_member_id;
+            $memberTotalsByRound[$roundNumber][$memberId] ??= [
+                'paid_amount' => 0,
+                'expected_amount' => 0,
+                'principal_amount' => 0,
+                'fee_amount' => 0,
+                'penalty_amount' => 0,
+                'paid_principal_amount' => 0,
+                'paid_fee_amount' => 0,
+                'paid_penalty_amount' => 0,
+                'slot_count' => 0,
+            ];
+            $memberTotalsByRound[$roundNumber][$memberId]['principal_amount'] += (int) $member->principal_amount;
+            $memberTotalsByRound[$roundNumber][$memberId]['fee_amount'] += (int) $member->fee_amount;
+            $memberTotalsByRound[$roundNumber][$memberId]['penalty_amount'] += (int) $member->penalty_amount;
+            $memberTotalsByRound[$roundNumber][$memberId]['expected_amount'] += (int) $member->principal_amount
+                + (int) $member->fee_amount
+                + (int) $member->penalty_amount;
+            $memberTotalsByRound[$roundNumber][$memberId]['slot_count'] = max(
+                $memberTotalsByRound[$roundNumber][$memberId]['slot_count'],
+                (int) $member->slot_count,
+            );
+        }
+
+        foreach ($paymentRows as $payment) {
+            $roundNumber = $payoutRoundFor((int) $payment->round_number);
+            if (! isset($memberTotalsByRound[$roundNumber])) {
+                continue;
+            }
+
+            $memberId = (int) $payment->group_member_id;
+            if (! isset($memberTotalsByRound[$roundNumber][$memberId])) {
+                continue;
+            }
+
+            $memberTotalsByRound[$roundNumber][$memberId]['paid_amount'] += (int) $payment->paid_amount;
+            $memberTotalsByRound[$roundNumber][$memberId]['paid_principal_amount'] += (int) $payment->principal_amount;
+            $memberTotalsByRound[$roundNumber][$memberId]['paid_fee_amount'] += (int) $payment->fee_amount;
+            $memberTotalsByRound[$roundNumber][$memberId]['paid_penalty_amount'] += (int) $payment->penalty_amount;
+        }
+
+        return collect($roundNumbers)->mapWithKeys(function (int $roundNumber) use ($memberTotalsByRound): array {
+            $memberTotals = $memberTotalsByRound[$roundNumber] ?? [];
             $paidAmounts = collect($memberTotals)->pluck('paid_amount')->filter(fn (int $amount): bool => $amount > 0)->unique()->values();
 
             return [(int) $roundNumber => [
                 'paid_total' => (int) collect($memberTotals)->sum('paid_amount'),
-                'member_count' => count($memberTotals),
+                'member_count' => collect($memberTotals)->where('paid_amount', '>', 0)->count(),
                 'paid_amount_per_member' => $paidAmounts->count() === 1 ? (int) $paidAmounts->first() : null,
                 'members' => $memberTotals,
             ]];

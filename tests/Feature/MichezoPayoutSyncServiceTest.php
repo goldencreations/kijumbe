@@ -7,6 +7,7 @@ use App\Enums\GroupRole;
 use App\Enums\GroupStatus;
 use App\Enums\PaymentAttemptStatus;
 use App\Enums\RoundStatus;
+use App\Enums\SystemRole;
 use App\Models\Cycle;
 use App\Models\CycleMember;
 use App\Models\Group;
@@ -31,6 +32,124 @@ use Tests\TestCase;
 class MichezoPayoutSyncServiceTest extends TestCase
 {
     use RefreshDatabase;
+
+    public function test_cycle_page_groups_multiple_slots_into_one_member_row_with_multiplied_amounts(): void
+    {
+        Carbon::setTestNow(Carbon::parse('2026-09-24 09:00:00', 'Africa/Dar_es_Salaam'));
+        $this->withoutVite();
+        $users = User::factory()->count(2)->sequence(
+            ['name' => 'Shaban Ally', 'system_role' => SystemRole::Admin],
+            ['name' => 'Ashraf Madobe'],
+        )->create();
+        $group = Group::create([
+            'name' => 'Slot display test',
+            'status' => GroupStatus::Active,
+            'created_by' => $users[0]->id,
+            'contribution_amount' => 200,
+            'currency' => 'TZS',
+            'contribution_interval_days' => 1,
+            'payout_interval_days' => 2,
+            'member_slots' => 4,
+            'cycle_starts_at' => now()->subDay(),
+            'kijumbe_fee' => 50,
+            'penalty_amount' => 50,
+        ]);
+
+        $members = collect();
+        foreach ($users as $index => $user) {
+            $members->push(GroupMember::create([
+                'group_id' => $group->id,
+                'user_id' => $user->id,
+                'member_name' => $user->name,
+                'majina_count' => $index === 0 ? 3 : 1,
+                'role' => $index === 0 ? GroupRole::Coordinator : GroupRole::Member,
+                'is_active' => true,
+                'joined_at' => now(),
+            ]));
+        }
+
+        $slots = collect();
+        foreach ([
+            [$members[0], 1],
+            [$members[0], 2],
+            [$members[0], 3],
+            [$members[1], 1],
+        ] as $position => [$member, $slotNumber]) {
+            $slots->push(GroupMemberSlot::create([
+                'group_id' => $group->id,
+                'group_member_id' => $member->id,
+                'slot_number' => $slotNumber,
+                'payout_position' => $position + 1,
+                'status' => 'active',
+            ]));
+        }
+
+        $attempts = [];
+        foreach ($members as $index => $member) {
+            $slotCount = $member->id === $members[0]->id ? 3 : 1;
+            $attempts[$member->id] = PaymentAttempt::create([
+                'initiated_by' => $member->user_id,
+                'provider' => 'ecofy',
+                'method' => 'mobile_money',
+                'order_reference' => 'SLOT-DISPLAY-'.$index,
+                'idempotency_key' => 'slot-display-'.$index,
+                'phone_e164' => '25570000000'.$index,
+                'amount' => 550 * $slotCount,
+                'currency' => 'TZS',
+                'status' => PaymentAttemptStatus::Successful,
+                'payment_scope' => 'member_ledger',
+                'provider_reference' => 'SLOT-PROVIDER-'.$index,
+                'completed_at' => now(),
+            ]);
+        }
+
+        foreach ($slots as $slot) {
+            foreach ([1 => 50, 2 => 0] as $roundNumber => $fee) {
+                $amount = 200 + $fee + 50;
+                $obligation = MemberPaymentObligation::create([
+                    'group_id' => $group->id,
+                    'group_member_slot_id' => $slot->id,
+                    'round_number' => $roundNumber,
+                    'due_at' => now()->subDays(2 - $roundNumber),
+                    'principal_amount' => 200,
+                    'kijumbe_fee_amount' => $fee,
+                    'platform_fee_percent' => 30,
+                    'platform_fee_amount' => $fee > 0 ? 15 : 0,
+                    'coordinator_fee_amount' => $fee > 0 ? 35 : 0,
+                    'penalty_amount' => 50,
+                    'paid_amount' => $amount,
+                    'status' => 'paid',
+                    'paid_at' => now(),
+                ]);
+                PaymentAllocation::create([
+                    'payment_attempt_id' => $attempts[$slot->group_member_id]->id,
+                    'member_payment_obligation_id' => $obligation->id,
+                    'amount' => $amount,
+                    'principal_amount' => 200,
+                    'kijumbe_fee_amount' => $fee,
+                    'platform_fee_amount' => $fee > 0 ? 15 : 0,
+                    'coordinator_fee_amount' => $fee > 0 ? 35 : 0,
+                    'penalty_amount' => 50,
+                ]);
+            }
+        }
+
+        $this->assertSame(1, app(MichezoPayoutSyncService::class)->sync($group->fresh()));
+        $cycle = $group->cycles()->firstOrFail();
+        $response = $this->actingAs($users[0])->get('/admin/cycles/'.$cycle->id)->assertOk();
+        $content = $response->getContent();
+
+        $response
+            ->assertSee('2 members &middot; 4 slots', false)
+            ->assertSee('3 slots &times; TZS 550', false)
+            ->assertViewHas('roundLedgerTotals', fn (array $totals): bool => $totals[1]['members'][$members[0]->id]['slot_count'] === 3
+                && $totals[1]['members'][$members[0]->id]['expected_amount'] === 1650
+                && $totals[1]['members'][$members[0]->id]['paid_amount'] === 1650
+            );
+        $this->assertSame(1, substr_count($content, 'data-payout-member="'.$members[0]->id.'"'));
+        $this->assertSame(1, substr_count($content, 'data-round-member="'.$members[0]->id.'"'));
+        Carbon::setTestNow();
+    }
 
     public function test_obligation_due_later_today_is_materialized_before_its_deadline(): void
     {
