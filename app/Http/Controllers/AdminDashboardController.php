@@ -337,14 +337,16 @@ class AdminDashboardController extends Controller
     public function cycle(Cycle $cycle, GroupFinancialReportService $reports): View
     {
         $cycle = $cycle->load([
-            'group', 'members.groupMember.user', 'rounds.recipient.groupMember.user',
+            'group', 'members.slot', 'members.groupMember.user', 'rounds.recipient.slot', 'rounds.recipient.groupMember.user',
             'rounds.contributions.cycleMember.groupMember.user', 'rounds.contributions.paymentAttempts', 'rounds.payout', 'rounds.decisions.decider',
         ]);
+
         return view('admin.cycle', [
             'page' => 'groups',
             'title' => $cycle->name,
             'cycle' => $cycle,
             'roundLedgerTotals' => $reports->cycleRoundLedgerTotals($cycle),
+            'paymentRounds' => $reports->cyclePaymentRounds($cycle),
         ]);
     }
 }

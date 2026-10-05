@@ -104,7 +104,8 @@ class MichezoPayoutSyncServiceTest extends TestCase
         }
 
         foreach ($slots as $slot) {
-            foreach ([1 => 50, 2 => 0] as $roundNumber => $fee) {
+            foreach (range(1, 8) as $roundNumber) {
+                $fee = $roundNumber === 1 ? 50 : 0;
                 $amount = 200 + $fee + 50;
                 $obligation = MemberPaymentObligation::create([
                     'group_id' => $group->id,
@@ -134,20 +135,29 @@ class MichezoPayoutSyncServiceTest extends TestCase
             }
         }
 
-        $this->assertSame(1, app(MichezoPayoutSyncService::class)->sync($group->fresh()));
+        $this->assertSame(4, app(MichezoPayoutSyncService::class)->sync($group->fresh()));
         $cycle = $group->cycles()->firstOrFail();
         $response = $this->actingAs($users[0])->get('/admin/cycles/'.$cycle->id)->assertOk();
         $content = $response->getContent();
 
         $response
             ->assertSee('2 members &middot; 4 slots', false)
+            ->assertSee('Payout rounds')
+            ->assertSee('Payment rounds')
+            ->assertSee('Shaban Ally &mdash; Slot 1', false)
+            ->assertSee('Shaban Ally &mdash; Slot 2', false)
+            ->assertSee('Shaban Ally &mdash; Slot 3', false)
             ->assertSee('3 slots &times; TZS 550', false)
             ->assertViewHas('roundLedgerTotals', fn (array $totals): bool => $totals[1]['members'][$members[0]->id]['slot_count'] === 3
                 && $totals[1]['members'][$members[0]->id]['expected_amount'] === 1650
                 && $totals[1]['members'][$members[0]->id]['paid_amount'] === 1650
             );
-        $this->assertSame(1, substr_count($content, 'data-payout-member="'.$members[0]->id.'"'));
-        $this->assertSame(1, substr_count($content, 'data-round-member="'.$members[0]->id.'"'));
+        $this->assertSame(3, substr_count($content, 'data-payout-member="'.$members[0]->id.'"'));
+        $this->assertSame(4, substr_count($content, 'data-round-member="'.$members[0]->id.'"'));
+
+        $paymentResponse = $this->actingAs($users[0])->get('/admin/cycles/'.$cycle->id.'?view=payments')->assertOk();
+        $this->assertSame(8, substr_count($paymentResponse->getContent(), 'id="payment-round-'));
+        $paymentResponse->assertSee('3 slots &times; TZS 300', false);
         Carbon::setTestNow();
     }
 

@@ -10,6 +10,7 @@ use App\Models\MemberPaymentObligation;
 use App\Models\PaymentAllocation;
 use App\Models\Payout;
 use App\Models\User;
+use Illuminate\Support\Carbon;
 use Illuminate\Support\Collection;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Schema;
@@ -325,6 +326,77 @@ class GroupFinancialReportService
                 'member_count' => collect($memberTotals)->where('paid_amount', '>', 0)->count(),
                 'paid_amount_per_member' => $paidAmounts->count() === 1 ? (int) $paidAmounts->first() : null,
                 'members' => $memberTotals,
+            ]];
+        })->all();
+    }
+
+    /** @return array<int, array{due_at: Carbon, expected_total: int, paid_total: int, members: array<int, array{name: string, phone: string|null, slot_count: int, expected_amount: int, paid_amount: int, status: string, paid_at: Carbon|null}>}> */
+    public function cyclePaymentRounds(Cycle $cycle): array
+    {
+        if (! Schema::hasTable('member_payment_obligations') || ! Schema::hasTable('group_member_slots')) {
+            return [];
+        }
+
+        $payoutRoundCount = max($cycle->rounds->count(), (int) $cycle->member_count);
+        if ($payoutRoundCount === 0) {
+            return [];
+        }
+
+        $isEndOfGamePayout = Group::normalizePayoutMode($cycle->group->payout_mode) === Group::PAYOUT_MODE_END_OF_GAME;
+        $contributionInterval = max((int) ($cycle->group->contribution_interval_days ?: $cycle->group->period_days ?: 1), 1);
+        $payoutInterval = max((int) ($cycle->group->payout_interval_days ?: 1), 1);
+        $contributionsPerPayout = $isEndOfGamePayout ? 1 : max((int) ceil($payoutInterval / $contributionInterval), 1);
+        $paymentRoundCount = $payoutRoundCount * $contributionsPerPayout;
+
+        $obligationsByRound = MemberPaymentObligation::query()
+            ->with(['slot.groupMember.user'])
+            ->where('group_id', $cycle->group_id)
+            ->whereBetween('round_number', [1, $paymentRoundCount])
+            ->orderBy('round_number')
+            ->orderBy('group_member_slot_id')
+            ->get()
+            ->groupBy('round_number');
+
+        return collect(range(1, $paymentRoundCount))->mapWithKeys(function (int $roundNumber) use ($cycle, $contributionInterval, $obligationsByRound): array {
+            $obligations = $obligationsByRound->get($roundNumber, collect());
+            $dueAt = $obligations->first()?->due_at
+                ?: $cycle->starts_at->copy()->addDays(($roundNumber - 1) * $contributionInterval);
+
+            $members = $obligations
+                ->groupBy(fn (MemberPaymentObligation $obligation): int => (int) $obligation->slot->group_member_id)
+                ->map(function (Collection $memberObligations): array {
+                    /** @var MemberPaymentObligation $first */
+                    $first = $memberObligations->first();
+                    $member = $first->slot->groupMember;
+                    $expectedAmount = (int) $memberObligations->sum(fn (MemberPaymentObligation $obligation): int => (int) $obligation->principal_amount
+                        + (int) $obligation->kijumbe_fee_amount
+                        + (int) $obligation->penalty_amount
+                    );
+                    $paidAmount = (int) $memberObligations->sum('paid_amount');
+                    $status = match (true) {
+                        $expectedAmount > 0 && $paidAmount >= $expectedAmount => 'paid',
+                        $paidAmount > 0 => 'partial',
+                        $memberObligations->contains(fn (MemberPaymentObligation $obligation): bool => $obligation->status === 'defaulted') => 'defaulted',
+                        default => 'pending',
+                    };
+
+                    return [
+                        'name' => $member?->displayName() ?: 'Member',
+                        'phone' => $member?->displayPhone(),
+                        'slot_count' => $memberObligations->pluck('group_member_slot_id')->unique()->count(),
+                        'expected_amount' => $expectedAmount,
+                        'paid_amount' => $paidAmount,
+                        'status' => $status,
+                        'paid_at' => $memberObligations->pluck('paid_at')->filter()->sortDesc()->first(),
+                    ];
+                })
+                ->all();
+
+            return [$roundNumber => [
+                'due_at' => $dueAt,
+                'expected_total' => (int) collect($members)->sum('expected_amount'),
+                'paid_total' => (int) collect($members)->sum('paid_amount'),
+                'members' => $members,
             ]];
         })->all();
     }
