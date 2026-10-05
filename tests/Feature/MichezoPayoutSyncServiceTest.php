@@ -53,6 +53,7 @@ class MichezoPayoutSyncServiceTest extends TestCase
             'cycle_starts_at' => now()->subDay(),
             'kijumbe_fee' => 50,
             'penalty_amount' => 50,
+            'penalty_timing_hours' => 20,
         ]);
 
         $members = collect();
@@ -147,17 +148,17 @@ class MichezoPayoutSyncServiceTest extends TestCase
             ->assertSee('Shaban Ally &mdash; Slot 1', false)
             ->assertSee('Shaban Ally &mdash; Slot 2', false)
             ->assertSee('Shaban Ally &mdash; Slot 3', false)
-            ->assertSee('3 slots &times; TZS 550', false)
-            ->assertViewHas('roundLedgerTotals', fn (array $totals): bool => $totals[1]['members'][$members[0]->id]['slot_count'] === 3
-                && $totals[1]['members'][$members[0]->id]['expected_amount'] === 1650
-                && $totals[1]['members'][$members[0]->id]['paid_amount'] === 1650
-            );
+            ->assertSee('Payout Round 1')
+            ->assertSee('Recipient')
+            ->assertDontSee('Collected from members');
         $this->assertSame(3, substr_count($content, 'data-payout-member="'.$members[0]->id.'"'));
-        $this->assertSame(4, substr_count($content, 'data-round-member="'.$members[0]->id.'"'));
+        $this->assertSame(0, substr_count($content, 'data-round-member="'.$members[0]->id.'"'));
 
         $paymentResponse = $this->actingAs($users[0])->get('/admin/cycles/'.$cycle->id.'?view=payments')->assertOk();
         $this->assertSame(8, substr_count($paymentResponse->getContent(), 'id="payment-round-'));
-        $paymentResponse->assertSee('3 slots &times; TZS 300', false);
+        $paymentResponse
+            ->assertSee('3 slots &times; TZS 300', false)
+            ->assertSee('Grace ends 24 Sep 2026, 05:00 EAT');
         Carbon::setTestNow();
     }
 

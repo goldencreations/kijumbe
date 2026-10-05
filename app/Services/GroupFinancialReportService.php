@@ -330,7 +330,7 @@ class GroupFinancialReportService
         })->all();
     }
 
-    /** @return array<int, array{due_at: Carbon, expected_total: int, paid_total: int, members: array<int, array{name: string, phone: string|null, slot_count: int, expected_amount: int, paid_amount: int, status: string, paid_at: Carbon|null}>}> */
+    /** @return array<int, array{due_at: Carbon, grace_ends_at: Carbon, expected_total: int, paid_total: int, members: array<int, array{name: string, phone: string|null, slot_count: int, expected_amount: int, paid_amount: int, status: string, paid_at: Carbon|null}>}> */
     public function cyclePaymentRounds(Cycle $cycle): array
     {
         if (! Schema::hasTable('member_payment_obligations') || ! Schema::hasTable('group_member_slots')) {
@@ -347,6 +347,7 @@ class GroupFinancialReportService
         $payoutInterval = max((int) ($cycle->group->payout_interval_days ?: 1), 1);
         $contributionsPerPayout = $isEndOfGamePayout ? 1 : max((int) ceil($payoutInterval / $contributionInterval), 1);
         $paymentRoundCount = $payoutRoundCount * $contributionsPerPayout;
+        $graceHours = max((int) ($cycle->group->penalty_timing_hours ?? $cycle->group->grace_period_hours ?? $cycle->grace_period_hours ?? 0), 0);
 
         $obligationsByRound = MemberPaymentObligation::query()
             ->with(['slot.groupMember.user'])
@@ -357,7 +358,7 @@ class GroupFinancialReportService
             ->get()
             ->groupBy('round_number');
 
-        return collect(range(1, $paymentRoundCount))->mapWithKeys(function (int $roundNumber) use ($cycle, $contributionInterval, $obligationsByRound): array {
+        return collect(range(1, $paymentRoundCount))->mapWithKeys(function (int $roundNumber) use ($cycle, $contributionInterval, $graceHours, $obligationsByRound): array {
             $obligations = $obligationsByRound->get($roundNumber, collect());
             $dueAt = $obligations->first()?->due_at
                 ?: $cycle->starts_at->copy()->addDays(($roundNumber - 1) * $contributionInterval);
@@ -394,6 +395,7 @@ class GroupFinancialReportService
 
             return [$roundNumber => [
                 'due_at' => $dueAt,
+                'grace_ends_at' => $dueAt->copy()->addHours($graceHours),
                 'expected_total' => (int) collect($members)->sum('expected_amount'),
                 'paid_total' => (int) collect($members)->sum('paid_amount'),
                 'members' => $members,
